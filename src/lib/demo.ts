@@ -1,4 +1,4 @@
-import { COMPANY_ID } from "./constants";
+﻿import { COMPANY_ID } from "./constants";
 import type {
   AppUser,
   DailyUpdate,
@@ -8,8 +8,8 @@ import type {
   ScheduleStatus,
 } from "./types";
 
-/** Temporary UI preview mode — set false when Firebase auth is ready. */
-export const AUTH_BYPASS = true;
+/** Demo/preview mode — keep helpers; must be false for Firebase runtime. */
+export const AUTH_BYPASS = false;
 
 const PHOTO = {
   construction:

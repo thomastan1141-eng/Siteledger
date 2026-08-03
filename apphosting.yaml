@@ -1,0 +1,14 @@
+﻿# Firebase App Hosting — public Next.js Firebase web config (not secrets)
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyDpk3T_C_z3R7wfFPsb8mbEXW4d205rLQo
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: siteledger-52e17.firebaseapp.com
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: siteledger-52e17
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: siteledger-52e17.firebasestorage.app
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "1048030031330"
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: 1:1048030031330:web:1d26ee40f6a12082259dbb
