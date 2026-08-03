@@ -1,0 +1,127 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/companies/starry-home/users/$(request.auth.uid));
+    }
+
+    function profile() {
+      return userDoc().data;
+    }
+
+    function isActiveUser() {
+      return signedIn() && userDoc().exists && profile().active == true;
+    }
+
+    function isAdmin() {
+      return isActiveUser() && profile().role == 'admin';
+    }
+
+    function isStaffSide() {
+      return isActiveUser() && (profile().role == 'admin' || profile().role == 'staff');
+    }
+
+    function isClient() {
+      return isActiveUser() && profile().role == 'client';
+    }
+
+    function projectDoc(projectId) {
+      return get(/databases/$(database)/documents/companies/starry-home/projects/$(projectId)).data;
+    }
+
+    function canAccessProject(projectId) {
+      return isAdmin()
+        || (isStaffSide() && (
+          request.auth.uid in projectDoc(projectId).staffIds
+          || projectDoc(projectId).managerId == request.auth.uid
+        ))
+        || (isClient() && request.auth.uid in projectDoc(projectId).clientUserIds);
+    }
+
+    match /companies/{companyId} {
+      allow read: if isActiveUser() && companyId == 'starry-home';
+      allow write: if isAdmin() && companyId == 'starry-home';
+
+      match /users/{userId} {
+        allow read: if isStaffSide() || (signedIn() && request.auth.uid == userId);
+        allow create: if isAdmin() || (signedIn() && request.auth.uid == userId);
+        allow update: if isAdmin()
+          || (signedIn() && request.auth.uid == userId
+              && !request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['role', 'active', 'companyId', 'projectIds']));
+        allow delete: if isAdmin();
+      }
+
+      match /workCategories/{categoryId} {
+        allow read: if isStaffSide();
+        allow write: if isAdmin();
+      }
+
+      match /reminders/{reminderId} {
+        allow read: if isStaffSide();
+        allow write: if isStaffSide();
+      }
+
+      match /projects/{projectId} {
+        allow read: if isStaffSide()
+          || (isClient() && request.auth.uid in resource.data.clientUserIds);
+        allow create, delete: if isAdmin();
+        allow update: if isAdmin() || isStaffSide();
+
+        match /schedule/{itemId} {
+          allow read: if isStaffSide()
+            || (isClient() && request.auth.uid in projectDoc(projectId).clientUserIds);
+          allow write: if isStaffSide();
+        }
+
+        match /dailyPlans/{planId} {
+          allow read: if isStaffSide()
+            || (isClient() && request.auth.uid in projectDoc(projectId).clientUserIds);
+          allow write: if isStaffSide();
+        }
+
+        match /updates/{updateId} {
+          allow read: if isStaffSide()
+            || (isClient()
+                && request.auth.uid in projectDoc(projectId).clientUserIds
+                && resource.data.visibility == 'client_visible');
+          allow create: if isStaffSide();
+          allow update, delete: if isAdmin();
+        }
+
+        match /media/{mediaId} {
+          allow read: if isStaffSide()
+            || (isClient()
+                && request.auth.uid in projectDoc(projectId).clientUserIds
+                && resource.data.visibility in ['client_visible', 'handover']);
+          allow create: if isStaffSide();
+          allow update, delete: if isAdmin() || isStaffSide();
+        }
+
+        match /purchases/{purchaseId} {
+          allow read: if isStaffSide()
+            || (isClient()
+                && request.auth.uid in projectDoc(projectId).clientUserIds);
+
+          allow create: if isStaffSide()
+            || (isClient()
+                && request.auth.uid in projectDoc(projectId).clientUserIds
+                && request.resource.data.purchaseResponsibility == 'OWNER'
+                && request.resource.data.projectId == projectId);
+
+          allow update: if isStaffSide()
+            || (isClient()
+                && request.auth.uid in projectDoc(projectId).clientUserIds
+                && resource.data.purchaseResponsibility == 'OWNER'
+                && request.resource.data.purchaseResponsibility == 'OWNER');
+
+          allow delete: if isStaffSide();
+        }
+      }
+    }
+  }
+}

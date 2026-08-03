@@ -1,0 +1,24 @@
+"use client";
+
+import { SitePageHeader } from "@/components/progress/primitives";
+import { ProgressTimeline } from "@/components/progress/timeline";
+import { useClientProject } from "@/lib/client-project";
+
+export default function ClientTimelinePage() {
+  const { project, timelineGroups, mediaByUpdate } = useClientProject();
+
+  return (
+    <div>
+      <SitePageHeader
+        kicker="Site journal"
+        title="Progress story"
+        description={`Follow the renovation day by day for ${project.name}.`}
+      />
+      <ProgressTimeline
+        groups={timelineGroups}
+        mediaByUpdate={mediaByUpdate}
+        allowDownload={project.allowClientDownload}
+      />
+    </div>
+  );
+}
