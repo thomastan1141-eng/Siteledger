@@ -1,5 +1,5 @@
 import { collection, doc, getDocs, setDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { getFirebaseDb } from "../firebase";
 import { AUTH_BYPASS } from "../demo";
 import { COMPANY_ID, DEFAULT_WORK_ITEM_COLOR } from "../constants";
 import { dailyPlansPath } from "../paths";
@@ -40,7 +40,7 @@ export async function listDailyPlans(
   if (AUTH_BYPASS) {
     plans = demoPlans.filter((p) => p.projectId === projectId);
   } else {
-    const snap = await getDocs(collection(db, dailyPlansPath(projectId)));
+    const snap = await getDocs(collection(getFirebaseDb(), dailyPlansPath(projectId)));
     plans = snap.docs.map(
       (d) => ({ id: d.id, ...(d.data() as Omit<DailyPlan, "id">) }) as DailyPlan,
     );
@@ -100,7 +100,7 @@ export async function saveDailyPlan(input: {
     return plan;
   }
 
-  await setDoc(doc(db, dailyPlansPath(input.projectId), id), plan, {
+  await setDoc(doc(getFirebaseDb(), dailyPlansPath(input.projectId), id), plan, {
     merge: true,
   });
   return plan;

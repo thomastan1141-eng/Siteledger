@@ -16,7 +16,7 @@ import {
   type User,
 } from "firebase/auth";
 import { AUTH_BYPASS, DEMO_ADMIN, DEMO_CLIENT } from "./demo";
-import { auth, isFirebaseConfigured } from "./firebase";
+import { getFirebaseAuth, isFirebaseConfigured } from "./firebase";
 import {
   ensureBootstrapAdmin,
   getUserProfile,
@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    const unsub = onAuthStateChanged(auth, async (next) => {
+    const unsub = onAuthStateChanged(getFirebaseAuth(), async (next) => {
       setUser(next);
       if (next) {
         const p = await getUserProfile(next.uid);
@@ -79,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!isFirebaseConfigured) {
           throw new Error("Firebase is not configured. Add .env.local first.");
         }
-        const cred = await signInWithEmailAndPassword(auth, email, password);
+        const cred = await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
         let p = await getUserProfile(cred.user.uid);
         if (!p) {
           p = await ensureBootstrapAdmin({
@@ -89,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
         }
         if (!p || !p.active) {
-          await signOut(auth);
+          await signOut(getFirebaseAuth());
           throw new Error(
             "Account is inactive or not provisioned. Ask an admin to invite you.",
           );
@@ -102,12 +102,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfile(DEMO_ADMIN);
           return;
         }
-        await signOut(auth);
+        await signOut(getFirebaseAuth());
         setProfile(null);
       },
       async resetPassword(email) {
         if (AUTH_BYPASS) return;
-        await sendPasswordResetEmail(auth, email);
+        await sendPasswordResetEmail(getFirebaseAuth(), email);
       },
       hasRole(...roles) {
         return !!profile && roles.includes(profile.role);

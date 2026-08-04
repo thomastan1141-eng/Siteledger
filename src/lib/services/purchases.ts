@@ -15,7 +15,7 @@ import {
   ref,
   uploadBytesResumable,
 } from "firebase/storage";
-import { db, storage } from "../firebase";
+import { getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { AUTH_BYPASS } from "../demo";
 import { COMPANY_ID } from "../constants";
 import { compressImageFile } from "../image-compress";
@@ -327,7 +327,7 @@ export async function listPurchases(
   } else {
     const snap = await getDocs(
       query(
-        collection(db, purchasesPath(projectId)),
+        collection(getFirebaseDb(), purchasesPath(projectId)),
         orderBy("updatedAt", "desc"),
       ),
     );
@@ -398,7 +398,7 @@ export async function createPurchase(
     return item;
   }
 
-  const refDoc = await addDoc(collection(db, purchasesPath(projectId)), {
+  const refDoc = await addDoc(collection(getFirebaseDb(), purchasesPath(projectId)), {
     ...data,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -486,7 +486,7 @@ export async function updatePurchase(
     return { ...existing, ...payload, id: purchaseId };
   }
 
-  await updateDoc(doc(db, purchasesPath(projectId), purchaseId), {
+  await updateDoc(doc(getFirebaseDb(), purchasesPath(projectId), purchaseId), {
     ...payload,
     updatedAt: serverTimestamp(),
   });
@@ -542,13 +542,13 @@ export async function deletePurchase(
         .filter((p) => p.storagePath && p.storagePath !== "demo")
         .map(async (p) => {
           try {
-            await deleteObject(ref(storage, p.storagePath));
+            await deleteObject(ref(getFirebaseStorage(), p.storagePath));
           } catch {
             /* ignore */
           }
         }),
     );
-    await deleteDoc(doc(db, purchasesPath(projectId), purchaseId));
+    await deleteDoc(doc(getFirebaseDb(), purchasesPath(projectId), purchaseId));
   }
   demoPurchases = demoPurchases.filter((p) => p.id !== purchaseId);
 }
@@ -638,7 +638,7 @@ export async function uploadPurchasePhotos(
       purchaseId,
       uniqueFileName(file),
     );
-    const storageRef = ref(storage, path);
+    const storageRef = ref(getFirebaseStorage(), path);
     const task = uploadBytesResumable(storageRef, file, {
       contentType: file.type || "image/jpeg",
     });
@@ -699,7 +699,7 @@ export async function removePurchasePhoto(
     target.storagePath !== "demo"
   ) {
     try {
-      await deleteObject(ref(storage, target.storagePath));
+      await deleteObject(ref(getFirebaseStorage(), target.storagePath));
     } catch {
       /* ignore */
     }

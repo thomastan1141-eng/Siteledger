@@ -8,7 +8,7 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_UPDATES } from "../demo";
 import { updatesPath } from "../paths";
@@ -64,7 +64,7 @@ export async function listUpdates(
   }
 
   const q = query(
-    collection(db, updatesPath(projectId)),
+    collection(getFirebaseDb(), updatesPath(projectId)),
     orderBy("createdAt", "desc"),
   );
   const snap = await getDocs(q);
@@ -88,7 +88,7 @@ export async function hasUpdateOnDate(projectId: string, date: string) {
     return demoUpdates.some((u) => u.projectId === projectId && u.date === date);
   }
   const q = query(
-    collection(db, updatesPath(projectId)),
+    collection(getFirebaseDb(), updatesPath(projectId)),
     where("date", "==", date),
   );
   const snap = await getDocs(q);
@@ -223,14 +223,14 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
   };
 
   const ref = await addDoc(
-    collection(db, updatesPath(input.projectId)),
+    collection(getFirebaseDb(), updatesPath(input.projectId)),
     updateData,
   );
 
   // Link media back to update
   await Promise.all(
     mediaIds.map((id) =>
-      updateDoc(doc(db, `companies/${COMPANY_ID}/projects/${input.projectId}/media`, id), {
+      updateDoc(doc(getFirebaseDb(), `companies/${COMPANY_ID}/projects/${input.projectId}/media`, id), {
         updateId: ref.id,
       }),
     ),

@@ -8,7 +8,7 @@ import {
   where,
 } from "firebase/firestore";
 import { differenceInCalendarDays, parseISO } from "date-fns";
-import { db } from "../firebase";
+import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS } from "../demo";
 import { remindersPath } from "../paths";
@@ -20,7 +20,7 @@ export async function listOpenReminders() {
   if (AUTH_BYPASS) return [];
 
   const q = query(
-    collection(db, remindersPath()),
+    collection(getFirebaseDb(), remindersPath()),
     where("resolved", "==", false),
   );
   const snap = await getDocs(q);
@@ -32,7 +32,7 @@ export async function listOpenReminders() {
 }
 
 export async function resolveReminder(id: string) {
-  await updateDoc(doc(db, remindersPath(), id), { resolved: true });
+  await updateDoc(doc(getFirebaseDb(), remindersPath(), id), { resolved: true });
 }
 
 export async function createReminder(
@@ -44,7 +44,7 @@ export async function createReminder(
     resolved: false,
     createdAt: new Date().toISOString(),
   };
-  const ref = await addDoc(collection(db, remindersPath()), data);
+  const ref = await addDoc(collection(getFirebaseDb(), remindersPath()), data);
   return { id: ref.id, ...data };
 }
 

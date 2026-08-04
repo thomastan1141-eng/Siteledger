@@ -14,7 +14,7 @@ import {
   uploadBytesResumable,
   type UploadTaskSnapshot,
 } from "firebase/storage";
-import { db, storage } from "../firebase";
+import { getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_MEDIA } from "../demo";
 import { mediaPath, storageMediaPath } from "../paths";
@@ -56,7 +56,7 @@ export async function uploadMediaFile(
     kind,
     uniqueFileName(file),
   );
-  const storageRef = ref(storage, path);
+  const storageRef = ref(getFirebaseStorage(), path);
   const task = uploadBytesResumable(storageRef, file, {
     contentType: file.type || undefined,
   });
@@ -97,7 +97,7 @@ export async function createMediaRecord(
     companyId: COMPANY_ID,
     createdAt: new Date().toISOString(),
   };
-  const refDoc = await addDoc(collection(db, mediaPath(projectId)), data);
+  const refDoc = await addDoc(collection(getFirebaseDb(), mediaPath(projectId)), data);
   return { id: refDoc.id, ...data };
 }
 
@@ -115,7 +115,7 @@ export async function listMedia(
     : (
         await getDocs(
           query(
-            collection(db, mediaPath(projectId)),
+            collection(getFirebaseDb(), mediaPath(projectId)),
             orderBy("createdAt", "desc"),
           ),
         )
@@ -147,9 +147,9 @@ export async function updateMediaVisibility(
   mediaIds: string[],
   visibility: MediaVisibility,
 ) {
-  const batch = writeBatch(db);
+  const batch = writeBatch(getFirebaseDb());
   mediaIds.forEach((id) => {
-    batch.update(doc(db, mediaPath(projectId), id), { visibility });
+    batch.update(doc(getFirebaseDb(), mediaPath(projectId), id), { visibility });
   });
   await batch.commit();
 }
@@ -159,7 +159,7 @@ export async function updateMediaCaption(
   mediaId: string,
   caption: string,
 ) {
-  await updateDoc(doc(db, mediaPath(projectId), mediaId), { caption });
+  await updateDoc(doc(getFirebaseDb(), mediaPath(projectId), mediaId), { caption });
 }
 
 export function detectMediaKind(file: File): MediaType | null {

@@ -6,7 +6,7 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_ADMIN, DEMO_CLIENT } from "../demo";
 import { setupMetaPath, usersPath } from "../paths";
@@ -17,7 +17,7 @@ export async function getUserProfile(uid: string): Promise<AppUser | null> {
     if (uid === DEMO_CLIENT.uid) return DEMO_CLIENT;
     return DEMO_ADMIN;
   }
-  const snap = await getDoc(doc(db, usersPath(), uid));
+  const snap = await getDoc(doc(getFirebaseDb(), usersPath(), uid));
   if (!snap.exists()) return null;
   return { uid: snap.id, ...(snap.data() as Omit<AppUser, "uid">) };
 }
@@ -36,7 +36,7 @@ export async function ensureBootstrapAdmin(input: {
   const existing = await getUserProfile(input.uid);
   if (existing) return existing;
 
-  const setupRef = doc(db, setupMetaPath());
+  const setupRef = doc(getFirebaseDb(), setupMetaPath());
   const setupSnap = await getDoc(setupRef);
   if (setupSnap.exists()) {
     return null;
@@ -57,7 +57,7 @@ export async function ensureBootstrapAdmin(input: {
     createdAt: now,
   };
 
-  await setDoc(doc(db, usersPath(), input.uid), {
+  await setDoc(doc(getFirebaseDb(), usersPath(), input.uid), {
     email: profile.email,
     displayName: profile.displayName,
     role: profile.role,
@@ -86,7 +86,7 @@ export async function upsertUserProfile(
     displayName: string;
   },
 ) {
-  const ref = doc(db, usersPath(), uid);
+  const ref = doc(getFirebaseDb(), usersPath(), uid);
   const existing = await getDoc(ref);
   const payload = {
     ...data,
@@ -106,7 +106,7 @@ export async function listUsersByRole(role?: UserRole) {
     const users = [DEMO_ADMIN, DEMO_CLIENT];
     return role ? users.filter((u) => u.role === role) : users;
   }
-  const snap = await getDocs(collection(db, usersPath()));
+  const snap = await getDocs(collection(getFirebaseDb(), usersPath()));
   return snap.docs
     .map(
       (d) => ({ uid: d.id, ...(d.data() as Omit<AppUser, "uid">) }) as AppUser,
@@ -116,7 +116,7 @@ export async function listUsersByRole(role?: UserRole) {
 
 export async function setClientAccess(uid: string, active: boolean) {
   if (AUTH_BYPASS) return;
-  await updateDoc(doc(db, usersPath(), uid), {
+  await updateDoc(doc(getFirebaseDb(), usersPath(), uid), {
     active,
     updatedAt: new Date().toISOString(),
   });

@@ -8,7 +8,7 @@ import {
   doc,
   writeBatch,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID, DEFAULT_WORK_CATEGORIES } from "../constants";
 import { AUTH_BYPASS } from "../demo";
 import { categoriesPath } from "../paths";
@@ -28,7 +28,7 @@ export async function listWorkCategories() {
   if (AUTH_BYPASS) return demoCategories();
 
   const q = query(
-    collection(db, categoriesPath()),
+    collection(getFirebaseDb(), categoriesPath()),
     orderBy("sortOrder", "asc"),
   );
   const snap = await getDocs(q);
@@ -44,11 +44,11 @@ export async function seedDefaultWorkCategories() {
   const existing = await listWorkCategories();
   if (existing.length) return existing;
 
-  const batch = writeBatch(db);
+  const batch = writeBatch(getFirebaseDb());
   const created: WorkCategory[] = [];
 
   DEFAULT_WORK_CATEGORIES.forEach((name, index) => {
-    const ref = doc(collection(db, categoriesPath()));
+    const ref = doc(collection(getFirebaseDb(), categoriesPath()));
     const data: Omit<WorkCategory, "id"> = {
       companyId: COMPANY_ID,
       name,
@@ -70,10 +70,10 @@ export async function createWorkCategory(name: string, sortOrder = 999) {
     sortOrder,
     active: true,
   };
-  const ref = await addDoc(collection(db, categoriesPath()), data);
+  const ref = await addDoc(collection(getFirebaseDb(), categoriesPath()), data);
   return { id: ref.id, ...data };
 }
 
 export async function setWorkCategoryActive(id: string, active: boolean) {
-  await updateDoc(doc(db, categoriesPath(), id), { active });
+  await updateDoc(doc(getFirebaseDb(), categoriesPath(), id), { active });
 }

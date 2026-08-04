@@ -9,7 +9,7 @@ import {
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { getFirebaseDb } from "../firebase";
 import { AUTH_BYPASS, DEMO_SCHEDULE } from "../demo";
 import { COMPANY_ID } from "../constants";
 import { schedulePath } from "../paths";
@@ -57,7 +57,7 @@ export async function listSchedule(
       .sort((a, b) => a.sortOrder - b.sortOrder);
   } else {
     const q = query(
-      collection(db, schedulePath(projectId)),
+      collection(getFirebaseDb(), schedulePath(projectId)),
       orderBy("sortOrder", "asc"),
     );
     const snap = await getDocs(q);
@@ -106,7 +106,7 @@ export async function createScheduleItem(
     return item;
   }
 
-  const ref = await addDoc(collection(db, schedulePath(projectId)), data);
+  const ref = await addDoc(collection(getFirebaseDb(), schedulePath(projectId)), data);
   return normalizeStage({ id: ref.id, ...data });
 }
 
@@ -181,7 +181,7 @@ export async function updateScheduleItem(
     );
     return;
   }
-  await updateDoc(doc(db, schedulePath(projectId), itemId), normalized);
+  await updateDoc(doc(getFirebaseDb(), schedulePath(projectId), itemId), normalized);
 }
 
 export async function reorderStages(
@@ -198,9 +198,9 @@ export async function reorderStages(
     return;
   }
 
-  const batch = writeBatch(db);
+  const batch = writeBatch(getFirebaseDb());
   orderedIds.forEach((id, index) => {
-    batch.update(doc(db, schedulePath(projectId), id), {
+    batch.update(doc(getFirebaseDb(), schedulePath(projectId), id), {
       sortOrder: index,
       updatedAt: new Date().toISOString(),
     });
@@ -213,7 +213,7 @@ export async function deleteScheduleItem(projectId: string, itemId: string) {
     demoSchedule = demoSchedule.filter((item) => item.id !== itemId);
     return;
   }
-  await deleteDoc(doc(db, schedulePath(projectId), itemId));
+  await deleteDoc(doc(getFirebaseDb(), schedulePath(projectId), itemId));
 }
 
 export function summarizeSchedule(items: ScheduleItem[]) {

@@ -1,7 +1,7 @@
 import { initializeApp, deleteApp, getApp } from "firebase/app";
 import { createUserWithEmailAndPassword, getAuth } from "firebase/auth";
 import { arrayUnion, doc, updateDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS } from "../demo";
 import { projectsPath, usersPath } from "../paths";
@@ -51,7 +51,7 @@ export async function inviteUser(input: {
     if (input.role === "client" && input.projectIds?.length) {
       await Promise.all(
         input.projectIds.map((projectId) =>
-          updateDoc(doc(db, projectsPath(), projectId), {
+          updateDoc(doc(getFirebaseDb(), projectsPath(), projectId), {
             clientUserIds: arrayUnion(cred.user.uid),
             updatedAt: new Date().toISOString(),
           }),
@@ -62,7 +62,7 @@ export async function inviteUser(input: {
     if (input.role === "staff" && input.projectIds?.length) {
       await Promise.all(
         input.projectIds.map((projectId) =>
-          updateDoc(doc(db, projectsPath(), projectId), {
+          updateDoc(doc(getFirebaseDb(), projectsPath(), projectId), {
             staffIds: arrayUnion(cred.user.uid),
             updatedAt: new Date().toISOString(),
           }),
@@ -86,11 +86,11 @@ export async function attachClientToProject(
   projectId: string,
   clientUid: string,
 ) {
-  await updateDoc(doc(db, projectsPath(), projectId), {
+  await updateDoc(doc(getFirebaseDb(), projectsPath(), projectId), {
     clientUserIds: arrayUnion(clientUid),
     updatedAt: new Date().toISOString(),
   });
-  await updateDoc(doc(db, usersPath(), clientUid), {
+  await updateDoc(doc(getFirebaseDb(), usersPath(), clientUid), {
     projectIds: arrayUnion(projectId),
     updatedAt: new Date().toISOString(),
   });

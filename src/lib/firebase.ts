@@ -4,15 +4,13 @@ import { getFirestore, type Firestore } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "demo-api-key",
-  authDomain:
-    process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "demo.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "demo-project",
-  storageBucket:
-    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "demo-project.appspot.com",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
   messagingSenderId:
-    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "0",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:0:web:demo",
+    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
 };
 
 export const isFirebaseConfigured = Boolean(
@@ -25,35 +23,31 @@ let authInstance: Auth | undefined;
 let dbInstance: Firestore | undefined;
 let storageInstance: FirebaseStorage | undefined;
 
-function getFirebaseApp() {
+export function getFirebaseApp() {
+  if (!isFirebaseConfigured) {
+    throw new Error(
+      "Firebase is not configured. Set NEXT_PUBLIC_FIREBASE_* environment variables.",
+    );
+  }
   if (!app) {
     app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   }
   return app;
 }
 
-export const auth = new Proxy({} as Auth, {
-  get(_target, prop, receiver) {
-    if (!authInstance) authInstance = getAuth(getFirebaseApp());
-    const value = Reflect.get(authInstance, prop, receiver);
-    return typeof value === "function" ? value.bind(authInstance) : value;
-  },
-});
+export function getFirebaseAuth(): Auth {
+  if (!authInstance) authInstance = getAuth(getFirebaseApp());
+  return authInstance;
+}
 
-export const db = new Proxy({} as Firestore, {
-  get(_target, prop, receiver) {
-    if (!dbInstance) dbInstance = getFirestore(getFirebaseApp());
-    const value = Reflect.get(dbInstance, prop, receiver);
-    return typeof value === "function" ? value.bind(dbInstance) : value;
-  },
-});
+export function getFirebaseDb(): Firestore {
+  if (!dbInstance) dbInstance = getFirestore(getFirebaseApp());
+  return dbInstance;
+}
 
-export const storage = new Proxy({} as FirebaseStorage, {
-  get(_target, prop, receiver) {
-    if (!storageInstance) storageInstance = getStorage(getFirebaseApp());
-    const value = Reflect.get(storageInstance, prop, receiver);
-    return typeof value === "function" ? value.bind(storageInstance) : value;
-  },
-});
+export function getFirebaseStorage(): FirebaseStorage {
+  if (!storageInstance) storageInstance = getStorage(getFirebaseApp());
+  return storageInstance;
+}
 
 export default getFirebaseApp;

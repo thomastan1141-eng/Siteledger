@@ -15,7 +15,7 @@ import {
   uploadBytesResumable,
   type UploadTaskSnapshot,
 } from "firebase/storage";
-import { db, storage } from "../firebase";
+import { getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_PROJECTS } from "../demo";
 import { projectsPath, storage3dPath } from "../paths";
@@ -89,7 +89,7 @@ export async function listProjects(options?: {
     return projects;
   }
 
-  const col = collection(db, projectsPath());
+  const col = collection(getFirebaseDb(), projectsPath());
   const q = query(col, orderBy("updatedAt", "desc"));
   const snap = await getDocs(q);
   let projects = snap.docs.map((d) => mapProject(d.id, d.data()));
@@ -116,7 +116,7 @@ export async function listClientProjects(clientUid: string) {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  const col = collection(db, projectsPath());
+  const col = collection(getFirebaseDb(), projectsPath());
   const q = query(col, where("clientUserIds", "array-contains", clientUid));
   const snap = await getDocs(q);
   return snap.docs
@@ -128,7 +128,7 @@ export async function getProject(projectId: string) {
   if (AUTH_BYPASS) {
     return demoProjects.find((p) => p.id === projectId) || null;
   }
-  const snap = await getDoc(doc(db, projectsPath(), projectId));
+  const snap = await getDoc(doc(getFirebaseDb(), projectsPath(), projectId));
   if (!snap.exists()) return null;
   return mapProject(snap.id, snap.data());
 }
@@ -207,7 +207,7 @@ export async function createProject(input: ProjectInput) {
   };
 
   draft.forecastStatus = deriveForecastStatus(draft as Project);
-  const ref = await addDoc(collection(db, projectsPath()), draft);
+  const ref = await addDoc(collection(getFirebaseDb(), projectsPath()), draft);
   return { id: ref.id, ...draft };
 }
 
@@ -241,7 +241,7 @@ export async function updateProject(
   }
 
   const { id: _id, ...data } = next;
-  await updateDoc(doc(db, projectsPath(), projectId), data);
+  await updateDoc(doc(getFirebaseDb(), projectsPath(), projectId), data);
   return next;
 }
 
@@ -295,7 +295,7 @@ export async function uploadProject3dImages(
       projectId,
       `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}`,
     );
-    const storageRef = ref(storage, path);
+    const storageRef = ref(getFirebaseStorage(), path);
     const task = uploadBytesResumable(storageRef, file, {
       contentType: file.type || "image/jpeg",
     });
