@@ -1,4 +1,4 @@
-rules_version = '2';
+﻿rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -6,7 +6,7 @@ service cloud.firestore {
     }
 
     function userDoc() {
-      return get(/databases/$(database)/documents/companies/starry-home/users/$(request.auth.uid));
+      return get(/databases/$(database)/documents/companies/siteledger/users/$(request.auth.uid));
     }
 
     function profile() {
@@ -30,7 +30,7 @@ service cloud.firestore {
     }
 
     function projectDoc(projectId) {
-      return get(/databases/$(database)/documents/companies/starry-home/projects/$(projectId)).data;
+      return get(/databases/$(database)/documents/companies/siteledger/projects/$(projectId)).data;
     }
 
     function canAccessProject(projectId) {
@@ -43,15 +43,15 @@ service cloud.firestore {
     }
 
     match /companies/{companyId} {
-      allow read: if isActiveUser() && companyId == 'starry-home';
-      allow write: if isAdmin() && companyId == 'starry-home';
+      allow read: if isActiveUser() && companyId == 'siteledger';
+      allow write: if isAdmin() && companyId == 'siteledger';
 
       match /meta/{docId} {
         allow read: if signedIn();
         allow create: if signedIn()
-          && companyId == 'starry-home'
+          && companyId == 'siteledger'
           && docId == 'setup'
-          && !exists(/databases/$(database)/documents/companies/starry-home/meta/setup)
+          && !exists(/databases/$(database)/documents/companies/siteledger/meta/setup)
           && request.resource.data.adminUid == request.auth.uid
           && request.resource.data.completed == true;
         allow update, delete: if isAdmin();
@@ -63,11 +63,11 @@ service cloud.firestore {
         allow create: if isAdmin()
           || (signedIn()
               && request.auth.uid == userId
-              && companyId == 'starry-home'
+              && companyId == 'siteledger'
               && request.resource.data.role == 'admin'
-              && request.resource.data.companyId == 'starry-home'
+              && request.resource.data.companyId == 'siteledger'
               && request.resource.data.active == true
-              && !exists(/databases/$(database)/documents/companies/starry-home/meta/setup));
+              && !exists(/databases/$(database)/documents/companies/siteledger/meta/setup));
         allow update: if isAdmin()
           || (signedIn() && request.auth.uid == userId
               && !request.resource.data.diff(resource.data).affectedKeys()

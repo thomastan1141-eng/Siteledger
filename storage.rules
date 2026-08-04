@@ -1,4 +1,4 @@
-rules_version = '2';
+﻿rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() {
@@ -6,7 +6,7 @@ service firebase.storage {
     }
 
     function userDoc() {
-      return firestore.get(/databases/(default)/documents/companies/starry-home/users/$(request.auth.uid));
+      return firestore.get(/databases/(default)/documents/companies/siteledger/users/$(request.auth.uid));
     }
 
     function isStaffSide() {
@@ -22,14 +22,14 @@ service firebase.storage {
     }
 
     function projectData(projectId) {
-      return firestore.get(/databases/(default)/documents/companies/starry-home/projects/$(projectId)).data;
+      return firestore.get(/databases/(default)/documents/companies/siteledger/projects/$(projectId)).data;
     }
 
     function isClientOnProject(projectId) {
       return isClient() && request.auth.uid in projectData(projectId).clientUserIds;
     }
 
-    match /companies/starry-home/projects/{projectId}/updates/{date}/{folder}/{fileName} {
+    match /companies/siteledger/projects/{projectId}/updates/{date}/{folder}/{fileName} {
       allow read: if isStaffSide()
         || (isClientOnProject(projectId) && folder in ['photos', 'videos', 'handover']);
       allow write: if isStaffSide()
@@ -41,14 +41,14 @@ service firebase.storage {
         );
     }
 
-    match /companies/starry-home/projects/{projectId}/3d/{fileName} {
+    match /companies/siteledger/projects/{projectId}/3d/{fileName} {
       allow read: if isStaffSide() || isClientOnProject(projectId);
       allow write: if isStaffSide()
         && request.resource.size < 50 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
-    match /companies/starry-home/projects/{projectId}/purchases/{purchaseId}/photos/{fileName} {
+    match /companies/siteledger/projects/{projectId}/purchases/{purchaseId}/photos/{fileName} {
       allow read: if isStaffSide() || isClientOnProject(projectId);
       allow write: if (isStaffSide() || isClientOnProject(projectId))
         && request.resource.size < 20 * 1024 * 1024

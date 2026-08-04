@@ -1,5 +1,5 @@
 /** Firestore tenant id — do not rename without data migration. */
-export const COMPANY_ID = "starry-home";
+export const COMPANY_ID = "siteledger";
 
 /** Platform brand shown in global chrome (not a project name). */
 export const PLATFORM_NAME = "SiteLedger";

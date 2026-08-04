@@ -59,7 +59,7 @@ const VIDEO = {
 
 export const DEMO_ADMIN: AppUser = {
   uid: "demo-admin",
-  email: "admin@starryhomestead.demo",
+  email: "admin@siteledger.demo",
   displayName: "Demo Admin",
   role: "admin",
   companyId: COMPANY_ID,
@@ -76,7 +76,7 @@ export const DEMO_ADMIN: AppUser = {
 
 export const DEMO_CLIENT: AppUser = {
   uid: "demo-client",
-  email: "client@starryhomestead.demo",
+  email: "client@siteledger.demo",
   displayName: "Alex Tan",
   role: "client",
   companyId: COMPANY_ID,
