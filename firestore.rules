@@ -46,9 +46,28 @@ service cloud.firestore {
       allow read: if isActiveUser() && companyId == 'starry-home';
       allow write: if isAdmin() && companyId == 'starry-home';
 
+      match /meta/{docId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && companyId == 'starry-home'
+          && docId == 'setup'
+          && !exists(/databases/$(database)/documents/companies/starry-home/meta/setup)
+          && request.resource.data.adminUid == request.auth.uid
+          && request.resource.data.completed == true;
+        allow update, delete: if isAdmin();
+      }
+
       match /users/{userId} {
         allow read: if isStaffSide() || (signedIn() && request.auth.uid == userId);
-        allow create: if isAdmin() || (signedIn() && request.auth.uid == userId);
+        // Admin invites others; first signed-in user may self-create as admin once.
+        allow create: if isAdmin()
+          || (signedIn()
+              && request.auth.uid == userId
+              && companyId == 'starry-home'
+              && request.resource.data.role == 'admin'
+              && request.resource.data.companyId == 'starry-home'
+              && request.resource.data.active == true
+              && !exists(/databases/$(database)/documents/companies/starry-home/meta/setup));
         allow update: if isAdmin()
           || (signedIn() && request.auth.uid == userId
               && !request.resource.data.diff(resource.data).affectedKeys()

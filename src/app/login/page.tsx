@@ -73,7 +73,8 @@ function LoginForm() {
             {PLATFORM_NAME}
           </h1>
           <p className="site-page-desc">
-            Sign in to the renovation progress workspace.
+            Sign in with your Firebase account. The first login creates the
+            admin profile automatically.
           </p>
         </div>
 

@@ -5,6 +5,9 @@ export const companyRef = (companyId = COMPANY_ID) => `companies/${companyId}`;
 export const usersPath = (companyId = COMPANY_ID) =>
   `${companyRef(companyId)}/users`;
 
+export const setupMetaPath = (companyId = COMPANY_ID) =>
+  `${companyRef(companyId)}/meta/setup`;
+
 export const projectsPath = (companyId = COMPANY_ID) =>
   `${companyRef(companyId)}/projects`;
 

@@ -17,7 +17,10 @@ import {
 } from "firebase/auth";
 import { AUTH_BYPASS, DEMO_ADMIN, DEMO_CLIENT } from "./demo";
 import { auth, isFirebaseConfigured } from "./firebase";
-import { getUserProfile } from "./services/users";
+import {
+  ensureBootstrapAdmin,
+  getUserProfile,
+} from "./services/users";
 import type { AppUser, UserRole } from "./types";
 
 type AuthContextValue = {
@@ -77,10 +80,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           throw new Error("Firebase is not configured. Add .env.local first.");
         }
         const cred = await signInWithEmailAndPassword(auth, email, password);
-        const p = await getUserProfile(cred.user.uid);
+        let p = await getUserProfile(cred.user.uid);
+        if (!p) {
+          p = await ensureBootstrapAdmin({
+            uid: cred.user.uid,
+            email: cred.user.email || email,
+            displayName: cred.user.displayName || undefined,
+          });
+        }
         if (!p || !p.active) {
           await signOut(auth);
-          throw new Error("Account is inactive or not provisioned.");
+          throw new Error(
+            "Account is inactive or not provisioned. Ask an admin to invite you.",
+          );
         }
         setProfile(p);
         return p;
