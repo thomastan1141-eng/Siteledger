@@ -8,7 +8,7 @@ export function AuthShell({
   description,
   children,
 }: {
-  title: string;
+  title?: string;
   description?: string;
   children: React.ReactNode;
 }) {
@@ -33,17 +33,22 @@ export function AuthShell({
               {PLATFORM_NAME}
             </h1>
           </Link>
-          <h2
-            style={{
-              margin: "18px 0 0",
-              fontSize: 20,
-              fontWeight: 650,
-            }}
-          >
-            {title}
-          </h2>
+          {title ? (
+            <h2
+              style={{
+                margin: "18px 0 0",
+                fontSize: 20,
+                fontWeight: 650,
+              }}
+            >
+              {title}
+            </h2>
+          ) : null}
           {description ? (
-            <p className="site-page-desc" style={{ marginTop: 8 }}>
+            <p
+              className="site-page-desc"
+              style={{ marginTop: title ? 8 : 14 }}
+            >
               {description}
             </p>
           ) : null}

@@ -52,10 +52,29 @@ export interface AppUser {
   studioName?: string | null;
   onboardingComplete?: boolean;
   emailVerified?: boolean;
+  /** Temporary access accounts must change password after first login. */
+  mustChangePassword?: boolean;
   projectIds: string[];
   createdAt: string;
   updatedAt?: string;
   active: boolean;
+}
+
+export type ProjectAccessRole = "CLIENT" | "STAFF";
+export type ProjectAccessStatus = "ACTIVE" | "REVOKED";
+
+export interface ProjectMember {
+  uid: string;
+  workspaceId: string;
+  projectId: string;
+  displayName: string;
+  email: string;
+  role: ProjectAccessRole;
+  status: ProjectAccessStatus;
+  mustChangePassword: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Workspace {

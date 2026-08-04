@@ -21,6 +21,7 @@ export function AuthGate({
     previewAs,
     needsEmailVerification,
     needsOnboarding,
+    needsPasswordChange,
   } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -40,6 +41,10 @@ export function AuthGate({
     if (loading) return;
     if (!user) {
       router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      return;
+    }
+    if (needsPasswordChange && pathname !== "/set-password") {
+      router.replace("/set-password");
       return;
     }
     if (needsEmailVerification || needsOnboarding) {
@@ -63,6 +68,7 @@ export function AuthGate({
     previewAs,
     needsEmailVerification,
     needsOnboarding,
+    needsPasswordChange,
   ]);
 
   if (AUTH_BYPASS) {
@@ -72,6 +78,7 @@ export function AuthGate({
   if (
     loading ||
     !user ||
+    needsPasswordChange ||
     needsEmailVerification ||
     needsOnboarding ||
     !profile ||

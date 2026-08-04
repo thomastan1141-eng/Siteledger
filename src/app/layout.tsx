@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { WorkspaceProvider } from "@/lib/workspace-context";
+import { SessionGuard } from "@/components/session-guard";
 import "./globals.css";
 
 const siteSans = Outfit({
@@ -27,7 +28,9 @@ export default function RootLayout({
     <html lang="en" className={`${siteSans.variable} h-full`}>
       <body className="site-app min-h-full antialiased">
         <AuthProvider>
-          <WorkspaceProvider>{children}</WorkspaceProvider>
+          <WorkspaceProvider>
+            <SessionGuard>{children}</SessionGuard>
+          </WorkspaceProvider>
         </AuthProvider>
       </body>
     </html>

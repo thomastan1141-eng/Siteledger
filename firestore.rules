@@ -151,8 +151,14 @@ service cloud.firestore {
       }
 
       match /projects/{projectId} {
-        allow read: if isCompanyStaffSide(companyId)
-          || isWorkspaceMember(companyId)
+        allow read: if isCompanyAdmin(companyId)
+          || isWorkspaceOwner(companyId)
+          || (hasCompanyUser(companyId)
+              && companyProfile(companyId).role == 'staff'
+              && (
+                request.auth.uid in resource.data.staffIds
+                || resource.data.managerId == request.auth.uid
+              ))
           || (isCompanyClient(companyId)
               && request.auth.uid in resource.data.clientUserIds);
 
@@ -162,8 +168,13 @@ service cloud.firestore {
           && request.resource.data.createdBy == request.auth.uid;
 
         allow update: if (isCompanyAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId))
+            || isWorkspaceOwner(companyId)
+            || (hasCompanyUser(companyId)
+                && companyProfile(companyId).role == 'staff'
+                && (
+                  request.auth.uid in resource.data.staffIds
+                  || resource.data.managerId == request.auth.uid
+                )))
           && request.resource.data.companyId == resource.data.companyId
           // workspaceId / createdBy immutable once set; may be stamped on legacy docs.
           && (
@@ -178,6 +189,13 @@ service cloud.firestore {
           );
 
         allow delete: if isCompanyAdmin(companyId) || isWorkspaceOwner(companyId);
+
+        match /members/{memberId} {
+          allow read: if isCompanyAdmin(companyId)
+            || isWorkspaceOwner(companyId)
+            || (signedIn() && request.auth.uid == memberId);
+          allow write: if false; // Admin SDK only
+        }
 
         match /schedule/{itemId} {
           allow read: if isCompanyStaffSide(companyId)

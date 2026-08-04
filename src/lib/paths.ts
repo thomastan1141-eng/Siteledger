@@ -32,6 +32,17 @@ export const projectsPath = (companyId = COMPANY_ID) =>
 export const projectPath = (projectId: string, companyId = COMPANY_ID) =>
   `${projectsPath(companyId)}/${projectId}`;
 
+export const projectMembersPath = (
+  projectId: string,
+  companyId = COMPANY_ID,
+) => `${projectPath(projectId, companyId)}/members`;
+
+export const projectMemberPath = (
+  projectId: string,
+  uid: string,
+  companyId = COMPANY_ID,
+) => `${projectMembersPath(projectId, companyId)}/${uid}`;
+
 export const categoriesPath = (companyId = COMPANY_ID) =>
   `${companyRef(companyId)}/workCategories`;
 

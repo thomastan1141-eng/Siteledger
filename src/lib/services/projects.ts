@@ -146,6 +146,24 @@ export async function listProjects(options?: {
   }
 
   const col = collection(getFirebaseDb(), projectsPath(ws));
+
+  // Staff must query by assignment so Firestore rules can authorize each doc.
+  if (options?.staffId) {
+    const staffQuery = query(
+      col,
+      where("staffIds", "array-contains", options.staffId),
+    );
+    const snap = await getDocs(staffQuery);
+    let projects = snap.docs
+      .map((d) => mapProject(d.id, d.data()))
+      .filter((p) => (p.workspaceId || p.companyId || COMPANY_ID) === ws)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    if (options?.status) {
+      projects = projects.filter((p) => p.status === options.status);
+    }
+    return projects;
+  }
+
   // Path already scopes to workspace; also filter workspaceId for defense in depth.
   const q = query(
     col,
@@ -158,13 +176,6 @@ export async function listProjects(options?: {
     let projects = snap.docs.map((d) => mapProject(d.id, d.data()));
     if (options?.status) {
       projects = projects.filter((p) => p.status === options.status);
-    }
-    if (options?.staffId) {
-      projects = projects.filter(
-        (p) =>
-          p.staffIds?.includes(options.staffId!) ||
-          p.managerId === options.staffId,
-      );
     }
     return projects;
   } catch (err) {
@@ -180,13 +191,6 @@ export async function listProjects(options?: {
       );
     if (options?.status) {
       projects = projects.filter((p) => p.status === options.status);
-    }
-    if (options?.staffId) {
-      projects = projects.filter(
-        (p) =>
-          p.staffIds?.includes(options.staffId!) ||
-          p.managerId === options.staffId,
-      );
     }
     return projects;
   }

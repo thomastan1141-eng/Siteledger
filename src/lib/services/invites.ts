@@ -1,97 +1,135 @@
-import { initializeApp, deleteApp, getApp } from "firebase/app";
-import { createUserWithEmailAndPassword, getAuth } from "firebase/auth";
-import { arrayUnion, doc, updateDoc } from "firebase/firestore";
-import { getFirebaseDb } from "../firebase";
-import { COMPANY_ID } from "../constants";
+import { getFirebaseAuth } from "../firebase";
 import { AUTH_BYPASS } from "../demo";
-import { projectsPath, usersPath } from "../paths";
-import { upsertUserProfile } from "./users";
 import type { UserRole } from "../types";
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
+export async function createProjectAccess(input: {
+  email: string;
+  password: string;
+  displayName: string;
+  role: Extract<UserRole, "client" | "staff">;
+  projectId: string;
+  workspaceId: string;
+}) {
+  if (AUTH_BYPASS) {
+    return {
+      uid: `demo-${input.role}-${Date.now()}`,
+      email: input.email,
+      displayName: input.displayName,
+      role: input.role,
+      projectId: input.projectId,
+    };
+  }
 
-/** Create Auth user without replacing the current admin session. */
+  if (!input.projectId.trim()) {
+    throw new Error("A project assignment is required.");
+  }
+
+  const current = getFirebaseAuth().currentUser;
+  if (!current) throw new Error("Please sign in again.");
+  const token = await current.getIdToken(true);
+
+  const res = await fetch("/api/access/create", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email: input.email.trim(),
+      password: input.password,
+      displayName: input.displayName.trim(),
+      role: input.role,
+      projectId: input.projectId.trim(),
+      workspaceId: input.workspaceId.trim(),
+    }),
+  });
+
+  const data = (await res.json()) as {
+    ok?: boolean;
+    uid?: string;
+    email?: string;
+    displayName?: string;
+    role?: string;
+    projectId?: string;
+    error?: string;
+  };
+
+  if (!res.ok) {
+    throw new Error(data.error || "We could not create access. Please try again.");
+  }
+
+  return {
+    uid: data.uid || "",
+    email: data.email || input.email,
+    displayName: data.displayName || input.displayName,
+    role: (data.role || input.role) as "client" | "staff",
+    projectId: data.projectId || input.projectId,
+  };
+}
+
+/** @deprecated use createProjectAccess */
 export async function inviteUser(input: {
   email: string;
   password: string;
   displayName: string;
   role: UserRole;
   projectIds?: string[];
+  workspaceId?: string;
 }) {
-  if (AUTH_BYPASS) {
-    return `demo-${input.role}-${Date.now()}`;
+  if (input.role !== "client" && input.role !== "staff") {
+    throw new Error("Only Client or Staff access can be created here.");
   }
+  const projectId = input.projectIds?.[0] || "";
+  if (!projectId) throw new Error("A project assignment is required.");
+  if (!input.workspaceId) throw new Error("Workspace is required.");
+  return createProjectAccess({
+    email: input.email,
+    password: input.password,
+    displayName: input.displayName,
+    role: input.role,
+    projectId,
+    workspaceId: input.workspaceId,
+  });
+}
 
-  const secondary = initializeApp(firebaseConfig, `invite-${Date.now()}`);
-  try {
-    const secondaryAuth = getAuth(secondary);
-    const cred = await createUserWithEmailAndPassword(
-      secondaryAuth,
-      input.email.trim(),
-      input.password,
-    );
-
-    await upsertUserProfile(cred.user.uid, {
-      email: input.email.trim(),
-      displayName: input.displayName.trim(),
-      role: input.role,
-      companyId: COMPANY_ID,
-      projectIds: input.projectIds || [],
-      active: true,
-      createdAt: new Date().toISOString(),
-    });
-
-    if (input.role === "client" && input.projectIds?.length) {
-      await Promise.all(
-        input.projectIds.map((projectId) =>
-          updateDoc(doc(getFirebaseDb(), projectsPath(), projectId), {
-            clientUserIds: arrayUnion(cred.user.uid),
-            updatedAt: new Date().toISOString(),
-          }),
-        ),
-      );
-    }
-
-    if (input.role === "staff" && input.projectIds?.length) {
-      await Promise.all(
-        input.projectIds.map((projectId) =>
-          updateDoc(doc(getFirebaseDb(), projectsPath(), projectId), {
-            staffIds: arrayUnion(cred.user.uid),
-            updatedAt: new Date().toISOString(),
-          }),
-        ),
-      );
-    }
-
-    return cred.user.uid;
-  } finally {
-    await deleteApp(secondary).catch(() => {
-      try {
-        getApp(`invite`);
-      } catch {
-        /* ignore */
-      }
-    });
+export async function revokeProjectAccess(input: {
+  uid: string;
+  workspaceId: string;
+  projectId?: string;
+}) {
+  if (AUTH_BYPASS) return;
+  const current = getFirebaseAuth().currentUser;
+  if (!current) throw new Error("Please sign in again.");
+  const token = await current.getIdToken(true);
+  const res = await fetch("/api/access/revoke", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  const data = (await res.json()) as { error?: string };
+  if (!res.ok) {
+    throw new Error(data.error || "We could not revoke access. Please try again.");
   }
 }
 
-export async function attachClientToProject(
-  projectId: string,
-  clientUid: string,
-) {
-  await updateDoc(doc(getFirebaseDb(), projectsPath(), projectId), {
-    clientUserIds: arrayUnion(clientUid),
-    updatedAt: new Date().toISOString(),
+export async function clearMustChangePasswordFlag(workspaceId?: string) {
+  if (AUTH_BYPASS) return;
+  const current = getFirebaseAuth().currentUser;
+  if (!current) throw new Error("Please sign in again.");
+  const token = await current.getIdToken(true);
+  const res = await fetch("/api/access/clear-password-flag", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ workspaceId: workspaceId || "" }),
   });
-  await updateDoc(doc(getFirebaseDb(), usersPath(), clientUid), {
-    projectIds: arrayUnion(projectId),
-    updatedAt: new Date().toISOString(),
-  });
+  if (!res.ok) {
+    const data = (await res.json()) as { error?: string };
+    throw new Error(data.error || "We could not update your password status.");
+  }
 }

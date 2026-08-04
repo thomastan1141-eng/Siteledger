@@ -20,7 +20,7 @@ const NAV = [
   { href: "/dashboard", label: "Today", icon: LayoutGrid },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/media", label: "Media", icon: Camera },
-  { href: "/clients", label: "People", icon: Users },
+  { href: "/access", label: "Access", icon: Users },
   { href: "/storage", label: "Storage", icon: HardDrive },
   { href: "/account", label: "Account", icon: UserRound },
 ];

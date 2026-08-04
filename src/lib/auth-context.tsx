@@ -16,14 +16,21 @@ import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
   updateProfile,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
   type User,
 } from "firebase/auth";
 import { AUTH_BYPASS, DEMO_ADMIN, DEMO_CLIENT } from "./demo";
 import { getFirebaseAuth, isFirebaseConfigured } from "./firebase";
 import { friendlyAuthError } from "./auth-errors";
 import {
+  broadcastAuthEvent,
+  clearSessionMarkers,
+  setSessionMode,
+} from "./session";
+import {
   completeOnboardingClient,
-  ensureBootstrapAdmin,
   getUserProfile,
 } from "./services/users";
 import type { AppUser, UserRole } from "./types";
@@ -35,6 +42,10 @@ type SignupInput = {
   studioName?: string;
 };
 
+type LoginOptions = {
+  trustDevice?: boolean;
+};
+
 type AuthContextValue = {
   user: User | null;
   profile: AppUser | null;
@@ -42,7 +53,12 @@ type AuthContextValue = {
   emailVerified: boolean;
   needsEmailVerification: boolean;
   needsOnboarding: boolean;
-  login: (email: string, password: string) => Promise<AppUser | null>;
+  needsPasswordChange: boolean;
+  login: (
+    email: string,
+    password: string,
+    options?: LoginOptions,
+  ) => Promise<AppUser | null>;
   signup: (input: SignupInput) => Promise<User>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -81,7 +97,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (AUTH_BYPASS) {
-      // Demo profile seed — intentional sync set for bypass mode.
       // eslint-disable-next-line react-hooks/set-state-in-effect -- AUTH_BYPASS bootstrap
       setProfile({
         ...DEMO_ADMIN,
@@ -105,18 +120,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const emailVerified = AUTH_BYPASS ? true : Boolean(user?.emailVerified);
-  // Existing provisioned staff/clients keep access even if Auth emailVerified is false.
   const needsEmailVerification = Boolean(
     user &&
       !emailVerified &&
-      !(profile?.active && (profile.role === "admin" || profile.role === "staff" || profile.role === "client")),
+      !(
+        profile?.active &&
+        (profile.role === "admin" ||
+          profile.role === "staff" ||
+          profile.role === "client")
+      ),
   );
-  // New verified signups (no profile yet) or incomplete SaaS onboarding.
   const needsOnboarding = Boolean(
     user &&
       !needsEmailVerification &&
       profile?.role !== "client" &&
       (!profile || profile.onboardingComplete === false),
+  );
+  const needsPasswordChange = Boolean(
+    user && profile?.active && profile.mustChangePassword === true,
   );
 
   const value = useMemo<AuthContextValue>(
@@ -127,38 +148,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       emailVerified,
       needsEmailVerification,
       needsOnboarding,
-      async login(email, password) {
+      needsPasswordChange,
+      async login(email, password, options) {
         if (AUTH_BYPASS) return profile || DEMO_ADMIN;
         if (!isFirebaseConfigured) {
           throw new Error("Firebase is not configured. Add .env.local first.");
         }
         try {
+          const trustDevice = Boolean(options?.trustDevice);
+          const auth = getFirebaseAuth();
+          await setPersistence(
+            auth,
+            trustDevice ? browserLocalPersistence : browserSessionPersistence,
+          );
           const cred = await signInWithEmailAndPassword(
-            getFirebaseAuth(),
+            auth,
             email,
             password,
           );
-          let p = await getUserProfile(cred.user.uid);
-          if (!p && cred.user.emailVerified) {
-            // Legacy first-admin bootstrap only when verified.
-            p = await ensureBootstrapAdmin({
-              uid: cred.user.uid,
-              email: cred.user.email || email,
-              displayName: cred.user.displayName || undefined,
-            });
-          }
+          setSessionMode(trustDevice ? "trusted" : "session");
+
+          const p = await getUserProfile(cred.user.uid);
           if (p && !p.active) {
-            await signOut(getFirebaseAuth());
+            clearSessionMarkers();
+            await signOut(auth);
             throw new Error(
               "This account has been disabled. Contact support if you need help.",
             );
           }
+          // Workspace owners are created via Signup + onboarding — never auto-provision on login.
           setUser(cred.user);
           setProfile(p);
+          broadcastAuthEvent("login");
           return p;
         } catch (err) {
           throw new Error(
-            friendlyAuthError(err, "We could not sign you in. Please try again."),
+            friendlyAuthError(
+              err,
+              "We could not sign you in. Please try again.",
+            ),
           );
         }
       },
@@ -170,8 +198,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           throw new Error("Firebase is not configured. Add .env.local first.");
         }
         try {
+          const auth = getFirebaseAuth();
+          await setPersistence(auth, browserSessionPersistence);
+          setSessionMode("session");
           const cred = await createUserWithEmailAndPassword(
-            getFirebaseAuth(),
+            auth,
             input.email.trim(),
             input.password,
           );
@@ -181,7 +212,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
           }
           await sendEmailVerification(cred.user);
-          // Stash studio name on localStorage until onboarding after verify.
           if (typeof window !== "undefined") {
             window.sessionStorage.setItem(
               "siteledger.pendingSignup",
@@ -208,6 +238,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfile(DEMO_ADMIN);
           return;
         }
+        clearSessionMarkers();
+        broadcastAuthEvent("logout");
         await signOut(getFirebaseAuth());
         setProfile(null);
         setUser(null);
@@ -217,7 +249,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
         } catch (err) {
-          // Always appear neutral to the caller for enumeration safety.
           console.error("[resetPassword]", err);
           const code =
             typeof err === "object" && err && "code" in err
@@ -278,9 +309,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return result.workspaceId || "";
       },
       async refreshProfile() {
-        const current = AUTH_BYPASS
-          ? null
-          : getFirebaseAuth().currentUser;
+        const current = AUTH_BYPASS ? null : getFirebaseAuth().currentUser;
         if (AUTH_BYPASS) return profile;
         return loadProfile(current);
       },
@@ -295,7 +324,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(role === "client" ? DEMO_CLIENT : DEMO_ADMIN);
       },
     }),
-    [user, profile, loading, emailVerified, needsEmailVerification, needsOnboarding],
+    [
+      user,
+      profile,
+      loading,
+      emailVerified,
+      needsEmailVerification,
+      needsOnboarding,
+      needsPasswordChange,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
