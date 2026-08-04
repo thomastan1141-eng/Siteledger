@@ -20,7 +20,7 @@ import { AUTH_BYPASS } from "../demo";
 import { COMPANY_ID } from "../constants";
 import { compressImageFile } from "../image-compress";
 import { calcRmbSgdTotals, roundMoney } from "../money";
-import { purchasesPath, storagePurchasePhotoPath } from "../paths";
+import { purchasesPath, storagePurchasePhotoPath, tenantId } from "../paths";
 import type {
   AppUser,
   LightingSpecifications,
@@ -31,6 +31,12 @@ import type {
   PurchaseStatus,
 } from "../types";
 import { DEFAULT_RMB_TO_SGD_RATE } from "../types";
+
+function purchaseWorkspace(user?: AppUser | null, workspaceId?: string) {
+  return tenantId(
+    workspaceId || user?.defaultWorkspaceId || user?.companyId,
+  );
+}
 
 export type PurchaseInput = {
   category: PurchaseCategory;
@@ -313,9 +319,10 @@ export function getProjectRmbRate(
 
 export async function listPurchases(
   projectId: string,
-  options?: { category?: PurchaseCategory; rmbToSgdRate?: number },
+  options?: { category?: PurchaseCategory; rmbToSgdRate?: number; workspaceId?: string },
 ) {
   const rate = getProjectRmbRate(projectId, options?.rmbToSgdRate);
+  const ws = purchaseWorkspace(null, options?.workspaceId);
   let items: PurchaseItem[];
 
   if (AUTH_BYPASS) {
@@ -327,7 +334,7 @@ export async function listPurchases(
   } else {
     const snap = await getDocs(
       query(
-        collection(getFirebaseDb(), purchasesPath(projectId)),
+        collection(getFirebaseDb(), purchasesPath(projectId, ws)),
         orderBy("updatedAt", "desc"),
       ),
     );
@@ -345,11 +352,13 @@ export async function createPurchase(
   input: PurchaseInput,
   user: AppUser,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
+  workspaceId?: string,
 ) {
   if (user.role === "client" && input.purchaseResponsibility !== "OWNER") {
     throw new Error("Owners can only create Owner purchase items.");
   }
 
+  const ws = purchaseWorkspace(user, workspaceId);
   const totals = calcRmbSgdTotals({
     quantity: input.quantity,
     unitPriceRMB: input.unitPriceRMB,
@@ -360,7 +369,7 @@ export async function createPurchase(
   const category = input.category;
   const data: Omit<PurchaseItem, "id"> = {
     projectId,
-    companyId: COMPANY_ID,
+    companyId: ws,
     category,
     itemName: input.itemName.trim(),
     description: input.description || "",
@@ -398,7 +407,7 @@ export async function createPurchase(
     return item;
   }
 
-  const refDoc = await addDoc(collection(getFirebaseDb(), purchasesPath(projectId)), {
+  const refDoc = await addDoc(collection(getFirebaseDb(), purchasesPath(projectId, ws)), {
     ...data,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -412,8 +421,10 @@ export async function updatePurchase(
   patch: Partial<PurchaseInput>,
   user: AppUser,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
+  workspaceId?: string,
 ) {
-  const existing = (await listPurchases(projectId, { rmbToSgdRate })).find(
+  const ws = purchaseWorkspace(user, workspaceId);
+  const existing = (await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) throw new Error("Purchase item not found");
@@ -486,7 +497,7 @@ export async function updatePurchase(
     return { ...existing, ...payload, id: purchaseId };
   }
 
-  await updateDoc(doc(getFirebaseDb(), purchasesPath(projectId), purchaseId), {
+  await updateDoc(doc(getFirebaseDb(), purchasesPath(projectId, ws), purchaseId), {
     ...payload,
     updatedAt: serverTimestamp(),
   });
@@ -498,11 +509,13 @@ export async function recalculatePurchaseTotals(
   projectId: string,
   rmbToSgdRate: number,
   user: AppUser,
+  workspaceId?: string,
 ) {
   if (user.role !== "admin" && user.role !== "staff") {
     throw new Error("Only studio users can change the exchange rate.");
   }
-  const items = await listPurchases(projectId, { rmbToSgdRate });
+  const ws = purchaseWorkspace(user, workspaceId);
+  const items = await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws });
   for (const item of items) {
     await updatePurchase(
       projectId,
@@ -513,6 +526,7 @@ export async function recalculatePurchaseTotals(
       },
       user,
       rmbToSgdRate,
+      ws,
     );
   }
   if (AUTH_BYPASS) {
@@ -524,8 +538,10 @@ export async function deletePurchase(
   projectId: string,
   purchaseId: string,
   user: AppUser,
+  workspaceId?: string,
 ) {
-  const existing = (await listPurchases(projectId)).find(
+  const ws = purchaseWorkspace(user, workspaceId);
+  const existing = (await listPurchases(projectId, { workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) return;
@@ -548,7 +564,7 @@ export async function deletePurchase(
           }
         }),
     );
-    await deleteDoc(doc(getFirebaseDb(), purchasesPath(projectId), purchaseId));
+    await deleteDoc(doc(getFirebaseDb(), purchasesPath(projectId, ws), purchaseId));
   }
   demoPurchases = demoPurchases.filter((p) => p.id !== purchaseId);
 }
@@ -558,8 +574,10 @@ export async function duplicatePurchase(
   purchaseId: string,
   user: AppUser,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
+  workspaceId?: string,
 ) {
-  const existing = (await listPurchases(projectId, { rmbToSgdRate })).find(
+  const ws = purchaseWorkspace(user, workspaceId);
+  const existing = (await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) throw new Error("Purchase item not found");
@@ -589,6 +607,7 @@ export async function duplicatePurchase(
     },
     user,
     rmbToSgdRate,
+    ws,
   );
 }
 
@@ -604,8 +623,10 @@ export async function uploadPurchasePhotos(
   user: AppUser,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
   onProgress?: (pct: number) => void,
+  workspaceId?: string,
 ) {
-  const existing = (await listPurchases(projectId, { rmbToSgdRate })).find(
+  const ws = purchaseWorkspace(user, workspaceId);
+  const existing = (await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) throw new Error("Purchase item not found");
@@ -673,6 +694,7 @@ export async function uploadPurchasePhotos(
     { photos, coverImageUrl: existing.coverImageUrl || photos[0]?.url || "" },
     user,
     rmbToSgdRate,
+    ws,
   );
 }
 
@@ -682,8 +704,10 @@ export async function removePurchasePhoto(
   photoId: string,
   user: AppUser,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
+  workspaceId?: string,
 ) {
-  const existing = (await listPurchases(projectId, { rmbToSgdRate })).find(
+  const ws = purchaseWorkspace(user, workspaceId);
+  const existing = (await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) throw new Error("Purchase item not found");
@@ -714,6 +738,7 @@ export async function removePurchasePhoto(
     { photos, coverImageUrl },
     user,
     rmbToSgdRate,
+    ws,
   );
 }
 

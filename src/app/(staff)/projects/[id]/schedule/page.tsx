@@ -85,6 +85,7 @@ export default function SchedulePage() {
       <SiteSection title="Monthly work calendar">
         <MonthWorkCalendar
           projectId={project.id}
+          workspaceId={project.workspaceId || workspaceId || undefined}
           stages={summary.ordered}
           editable
         />

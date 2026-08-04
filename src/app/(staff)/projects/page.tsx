@@ -36,7 +36,11 @@ export default function ProjectsPage() {
       return;
     }
     listProjects({
-      workspaceId: workspaceId || profile?.defaultWorkspaceId || undefined,
+      workspaceId:
+        workspaceId ||
+        profile?.defaultWorkspaceId ||
+        profile?.companyId ||
+        undefined,
       ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
     })
       .then(setProjects)

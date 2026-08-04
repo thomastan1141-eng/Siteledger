@@ -24,11 +24,12 @@ function demoCategories(): WorkCategory[] {
   }));
 }
 
-export async function listWorkCategories() {
+export async function listWorkCategories(workspaceId?: string) {
   if (AUTH_BYPASS) return demoCategories();
 
+  const ws = workspaceId?.trim() || COMPANY_ID;
   const q = query(
-    collection(getFirebaseDb(), categoriesPath()),
+    collection(getFirebaseDb(), categoriesPath(ws)),
     orderBy("sortOrder", "asc"),
   );
   const snap = await getDocs(q);
@@ -38,19 +39,20 @@ export async function listWorkCategories() {
   );
 }
 
-export async function seedDefaultWorkCategories() {
+export async function seedDefaultWorkCategories(workspaceId?: string) {
   if (AUTH_BYPASS) return demoCategories();
 
-  const existing = await listWorkCategories();
+  const ws = workspaceId?.trim() || COMPANY_ID;
+  const existing = await listWorkCategories(ws);
   if (existing.length) return existing;
 
   const batch = writeBatch(getFirebaseDb());
   const created: WorkCategory[] = [];
 
   DEFAULT_WORK_CATEGORIES.forEach((name, index) => {
-    const ref = doc(collection(getFirebaseDb(), categoriesPath()));
+    const ref = doc(collection(getFirebaseDb(), categoriesPath(ws)));
     const data: Omit<WorkCategory, "id"> = {
-      companyId: COMPANY_ID,
+      companyId: ws,
       name,
       sortOrder: index,
       active: true,
@@ -63,17 +65,27 @@ export async function seedDefaultWorkCategories() {
   return created;
 }
 
-export async function createWorkCategory(name: string, sortOrder = 999) {
+export async function createWorkCategory(
+  name: string,
+  sortOrder = 999,
+  workspaceId?: string,
+) {
+  const ws = workspaceId?.trim() || COMPANY_ID;
   const data: Omit<WorkCategory, "id"> = {
-    companyId: COMPANY_ID,
+    companyId: ws,
     name,
     sortOrder,
     active: true,
   };
-  const ref = await addDoc(collection(getFirebaseDb(), categoriesPath()), data);
+  const ref = await addDoc(collection(getFirebaseDb(), categoriesPath(ws)), data);
   return { id: ref.id, ...data };
 }
 
-export async function setWorkCategoryActive(id: string, active: boolean) {
-  await updateDoc(doc(getFirebaseDb(), categoriesPath(), id), { active });
+export async function setWorkCategoryActive(
+  id: string,
+  active: boolean,
+  workspaceId?: string,
+) {
+  const ws = workspaceId?.trim() || COMPANY_ID;
+  await updateDoc(doc(getFirebaseDb(), categoriesPath(ws), id), { active });
 }

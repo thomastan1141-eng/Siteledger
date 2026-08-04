@@ -45,20 +45,9 @@ export async function getUserProfile(uid: string): Promise<AppUser | null> {
     };
   }
 
-  // Legacy / invited users under companies/{tenant}/users
-  const companySnap = await getDoc(doc(getFirebaseDb(), usersPath(), uid));
-  if (companySnap.exists()) {
-    const data = companySnap.data() as Omit<AppUser, "uid">;
-    return {
-      uid,
-      ...data,
-      defaultWorkspaceId: data.defaultWorkspaceId || data.companyId || COMPANY_ID,
-      // Legacy company users are already provisioned.
-      onboardingComplete: data.onboardingComplete ?? true,
-    };
-  }
-
-  // Try known tenant only — invited users live under their company path.
+  // Legacy / invited users under companies/{tenant}/users.
+  // Do not probe the hard-coded COMPANY_ID path — that denies SaaS tenants
+  // and floods the console with permission errors.
   return null;
 }
 

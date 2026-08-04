@@ -143,6 +143,7 @@ export function PurchasesPanel({
 
   const rate =
     project.purchaseSettings?.rmbToSgdRate ?? DEFAULT_RMB_TO_SGD_RATE;
+  const purchaseWs = project.workspaceId || project.companyId;
   const canEditRate =
     !clientMode && (profile?.role === "admin" || profile?.role === "staff");
   const rateValue = rateDirty ? rateDraft : String(rate);
@@ -152,13 +153,14 @@ export function PurchasesPanel({
     const list = await listPurchases(project.id, {
       category: active,
       rmbToSgdRate: rate,
+      workspaceId: purchaseWs,
     });
     setItems(list);
   }
 
   useEffect(() => {
     let cancelled = false;
-    listPurchases(project.id, { category, rmbToSgdRate: rate }).then((list) => {
+    listPurchases(project.id, { category, rmbToSgdRate: rate, workspaceId: purchaseWs }).then((list) => {
       if (cancelled) return;
       setItems(list);
       setLoading(false);
@@ -196,6 +198,7 @@ export function PurchasesPanel({
         patch,
         profile,
         rate,
+        purchaseWs,
       );
       setItems((prev) => prev.map((p) => (p.id === next.id ? next : p)));
       if (gallery?.id === next.id) setGallery(next);
@@ -219,7 +222,7 @@ export function PurchasesPanel({
         purchaseSettings: { rmbToSgdRate: nextRate },
       });
       onProjectUpdated?.(updated);
-      await recalculatePurchaseTotals(project.id, nextRate, profile);
+      await recalculatePurchaseTotals(project.id, nextRate, profile, purchaseWs);
       setRateDirty(false);
       await reload(category);
       flash("saved");
@@ -413,13 +416,14 @@ export function PurchasesPanel({
                             item.id,
                             profile,
                             rate,
+                            purchaseWs,
                           );
                           await reload();
                         }}
                         onDelete={async () => {
                           if (!profile) return;
                           if (!confirm(`Delete “${item.itemName}”?`)) return;
-                          await deletePurchase(project.id, item.id, profile);
+                          await deletePurchase(project.id, item.id, profile, purchaseWs);
                           await reload();
                         }}
                       />
@@ -516,6 +520,7 @@ export function PurchasesPanel({
                   photoId,
                   profile,
                   rate,
+                  purchaseWs,
                 );
               }
               saved = await updatePurchase(
@@ -524,6 +529,7 @@ export function PurchasesPanel({
                 draft,
                 profile,
                 rate,
+                purchaseWs,
               );
             } else {
               saved = await createPurchase(
@@ -531,6 +537,7 @@ export function PurchasesPanel({
                 { ...draft, category },
                 profile,
                 rate,
+                purchaseWs,
               );
             }
             if (pending.length) {
@@ -541,6 +548,8 @@ export function PurchasesPanel({
                 pending.map((p) => p.file),
                 profile,
                 rate,
+                undefined,
+                purchaseWs,
               );
               if (coverPendingId) {
                 const idx = pending.findIndex((p) => p.id === coverPendingId);
@@ -553,6 +562,7 @@ export function PurchasesPanel({
                     { coverImageUrl: coverPhoto.url },
                     profile,
                     rate,
+                    purchaseWs,
                   );
                 }
               }
@@ -574,7 +584,7 @@ export function PurchasesPanel({
           onChanged={async () => {
             await reload();
             const next = (
-              await listPurchases(project.id, { rmbToSgdRate: rate })
+              await listPurchases(project.id, { rmbToSgdRate: rate, workspaceId: purchaseWs })
             ).find((p) => p.id === gallery.id);
             if (next) setGallery(next);
           }}

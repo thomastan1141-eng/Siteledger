@@ -16,11 +16,12 @@ import { getProjectDisplayName, todayKey } from "../utils";
 import { hasUpdateOnDate } from "./updates";
 import type { Project, Reminder } from "../types";
 
-export async function listOpenReminders() {
+export async function listOpenReminders(workspaceId?: string) {
   if (AUTH_BYPASS) return [];
 
+  const ws = workspaceId?.trim() || COMPANY_ID;
   const q = query(
-    collection(getFirebaseDb(), remindersPath()),
+    collection(getFirebaseDb(), remindersPath(ws)),
     where("resolved", "==", false),
   );
   const snap = await getDocs(q);
@@ -31,20 +32,23 @@ export async function listOpenReminders() {
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 }
 
-export async function resolveReminder(id: string) {
-  await updateDoc(doc(getFirebaseDb(), remindersPath(), id), { resolved: true });
+export async function resolveReminder(id: string, workspaceId?: string) {
+  const ws = workspaceId?.trim() || COMPANY_ID;
+  await updateDoc(doc(getFirebaseDb(), remindersPath(ws), id), { resolved: true });
 }
 
 export async function createReminder(
   input: Omit<Reminder, "id" | "companyId" | "createdAt" | "resolved">,
+  workspaceId?: string,
 ) {
+  const ws = workspaceId?.trim() || COMPANY_ID;
   const data: Omit<Reminder, "id"> = {
     ...input,
-    companyId: COMPANY_ID,
+    companyId: ws,
     resolved: false,
     createdAt: new Date().toISOString(),
   };
-  const ref = await addDoc(collection(getFirebaseDb(), remindersPath()), data);
+  const ref = await addDoc(collection(getFirebaseDb(), remindersPath(ws)), data);
   return { id: ref.id, ...data };
 }
 
@@ -61,7 +65,13 @@ export async function buildDashboardAlerts(projects: Project[]) {
   for (const project of projects) {
     if (project.status !== "in_progress") continue;
 
-    const updatedToday = await hasUpdateOnDate(project.id, today);
+    const ws = project.workspaceId || project.companyId;
+    let updatedToday = false;
+    try {
+      updatedToday = await hasUpdateOnDate(project.id, today, ws);
+    } catch (err) {
+      console.warn("[buildDashboardAlerts] hasUpdateOnDate", project.id, err);
+    }
     if (!updatedToday) {
       const title = getProjectDisplayName(project);
       alerts.push({

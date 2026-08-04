@@ -2,7 +2,7 @@ import { collection, doc, getDocs, setDoc } from "firebase/firestore";
 import { getFirebaseDb } from "../firebase";
 import { AUTH_BYPASS } from "../demo";
 import { COMPANY_ID, DEFAULT_WORK_ITEM_COLOR } from "../constants";
-import { dailyPlansPath } from "../paths";
+import { dailyPlansPath, tenantId } from "../paths";
 import type { DailyPlan, DailyPlanWorkItem } from "../types";
 
 let demoPlans: DailyPlan[] = [
@@ -33,14 +33,17 @@ let demoPlans: DailyPlan[] = [
 
 export async function listDailyPlans(
   projectId: string,
-  options?: { year?: number; month?: number },
+  options?: { year?: number; month?: number; workspaceId?: string },
 ) {
+  const ws = tenantId(options?.workspaceId);
   let plans: DailyPlan[];
 
   if (AUTH_BYPASS) {
     plans = demoPlans.filter((p) => p.projectId === projectId);
   } else {
-    const snap = await getDocs(collection(getFirebaseDb(), dailyPlansPath(projectId)));
+    const snap = await getDocs(
+      collection(getFirebaseDb(), dailyPlansPath(projectId, ws)),
+    );
     plans = snap.docs.map(
       (d) => ({ id: d.id, ...(d.data() as Omit<DailyPlan, "id">) }) as DailyPlan,
     );
@@ -54,8 +57,12 @@ export async function listDailyPlans(
   return plans.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-export async function getDailyPlan(projectId: string, date: string) {
-  const plans = await listDailyPlans(projectId);
+export async function getDailyPlan(
+  projectId: string,
+  date: string,
+  workspaceId?: string,
+) {
+  const plans = await listDailyPlans(projectId, { workspaceId });
   return plans.find((p) => p.date === date) || null;
 }
 
@@ -65,7 +72,9 @@ export async function saveDailyPlan(input: {
   items: DailyPlanWorkItem[];
   reminder?: string;
   note?: string;
+  workspaceId?: string;
 }) {
+  const ws = tenantId(input.workspaceId);
   const items = input.items
     .map((item) => ({
       workText: item.workText.trim(),
@@ -76,12 +85,12 @@ export async function saveDailyPlan(input: {
 
   const now = new Date().toISOString();
   const id = input.date;
-  const existing = await getDailyPlan(input.projectId, input.date);
+  const existing = await getDailyPlan(input.projectId, input.date, ws);
 
   const plan: DailyPlan = {
     id,
     projectId: input.projectId,
-    companyId: COMPANY_ID,
+    companyId: ws,
     date: input.date,
     items,
     reminder: input.reminder?.trim() || undefined,
@@ -100,13 +109,18 @@ export async function saveDailyPlan(input: {
     return plan;
   }
 
-  await setDoc(doc(getFirebaseDb(), dailyPlansPath(input.projectId), id), plan, {
-    merge: true,
-  });
+  await setDoc(
+    doc(getFirebaseDb(), dailyPlansPath(input.projectId, ws), id),
+    plan,
+    { merge: true },
+  );
   return plan;
 }
 
-export async function listClientVisiblePlans(projectId: string) {
-  const plans = await listDailyPlans(projectId);
+export async function listClientVisiblePlans(
+  projectId: string,
+  workspaceId?: string,
+) {
+  const plans = await listDailyPlans(projectId, { workspaceId });
   return plans.filter((plan) => plan.items.length > 0 || plan.note);
 }

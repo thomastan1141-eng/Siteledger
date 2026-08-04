@@ -85,12 +85,17 @@ export async function listUpdates(
   });
 }
 
-export async function hasUpdateOnDate(projectId: string, date: string) {
+export async function hasUpdateOnDate(
+  projectId: string,
+  date: string,
+  workspaceId?: string,
+) {
   if (AUTH_BYPASS) {
     return demoUpdates.some((u) => u.projectId === projectId && u.date === date);
   }
+  const ws = workspaceId?.trim() || COMPANY_ID;
   const q = query(
-    collection(getFirebaseDb(), updatesPath(projectId)),
+    collection(getFirebaseDb(), updatesPath(projectId, ws)),
     where("date", "==", date),
   );
   const snap = await getDocs(q);

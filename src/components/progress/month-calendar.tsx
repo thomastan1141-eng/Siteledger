@@ -30,11 +30,13 @@ const MAX_WORK_ITEMS = 4;
 
 export function MonthWorkCalendar({
   projectId,
+  workspaceId,
   stages: _stages,
   editable = true,
   clientVisibleOnly = false,
 }: {
   projectId: string;
+  workspaceId?: string;
   stages: ScheduleItem[];
   editable?: boolean;
   clientVisibleOnly?: boolean;
@@ -50,7 +52,12 @@ export function MonthWorkCalendar({
   async function reload() {
     setLoading(true);
     try {
-      setPlans(await listDailyPlans(projectId, { year, month }));
+      setPlans(
+        await listDailyPlans(projectId, { year, month, workspaceId }),
+      );
+    } catch (err) {
+      console.error("[MonthWorkCalendar]", err);
+      setPlans([]);
     } finally {
       setLoading(false);
     }
@@ -179,6 +186,7 @@ export function MonthWorkCalendar({
       {selectedDate ? (
         <DayPlanSheet
           projectId={projectId}
+          workspaceId={workspaceId}
           date={selectedDate}
           editable={editable}
           onClose={() => setSelectedDate(null)}
@@ -194,12 +202,14 @@ export function MonthWorkCalendar({
 
 function DayPlanSheet({
   projectId,
+  workspaceId,
   date,
   editable,
   onClose,
   onSaved,
 }: {
   projectId: string;
+  workspaceId?: string;
   date: string;
   editable: boolean;
   onClose: () => void;
@@ -214,7 +224,7 @@ function DayPlanSheet({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    getDailyPlan(projectId, date).then((plan) => {
+    getDailyPlan(projectId, date, workspaceId).then((plan) => {
       const loaded = (plan?.items || [])
         .map((item) => ({
           workText: item.workText || "",
@@ -230,7 +240,7 @@ function DayPlanSheet({
       setReminder(plan?.reminder || "");
       setNote(plan?.note || "");
     });
-  }, [projectId, date]);
+  }, [projectId, date, workspaceId]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -244,6 +254,7 @@ function DayPlanSheet({
         items,
         reminder,
         note,
+        workspaceId,
       });
       await onSaved();
     } catch (err) {

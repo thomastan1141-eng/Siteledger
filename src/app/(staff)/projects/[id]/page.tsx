@@ -297,6 +297,7 @@ export default function ProjectDetailsPage() {
               </p>
               <MonthWorkCalendar
                 projectId={project.id}
+                workspaceId={project.workspaceId || project.companyId}
                 stages={summary.ordered}
                 editable
               />

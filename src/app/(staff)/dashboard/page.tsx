@@ -34,7 +34,11 @@ export default function DashboardPage() {
       setLoading(true);
       try {
         const all = await listProjects({
-          workspaceId: workspaceId || profile?.defaultWorkspaceId || undefined,
+          workspaceId:
+            workspaceId ||
+            profile?.defaultWorkspaceId ||
+            profile?.companyId ||
+            undefined,
           ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
         });
         setProjects(all);

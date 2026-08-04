@@ -25,8 +25,11 @@ service cloud.firestore {
       return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid);
     }
 
+    // Membership doc is authoritative; app gate already enforces email verify.
+    // Do not require auth.token.email_verified here — stale tokens after verify
+    // were denying all tenant reads.
     function isWorkspaceMember(workspaceId) {
-      return isVerifiedUser()
+      return signedIn()
         && exists(memberPath(workspaceId))
         && get(memberPath(workspaceId)).data.status == 'ACTIVE';
     }
@@ -79,6 +82,12 @@ service cloud.firestore {
 
     function isCompanyClient(companyId) {
       return hasCompanyUser(companyId) && companyProfile(companyId).role == 'client';
+    }
+
+    function canAccessTenant(companyId) {
+      return isTenantAdmin(companyId)
+        || isCompanyStaffSide(companyId)
+        || isWorkspaceMember(companyId);
     }
 
     function projectDoc(companyId, projectId) {
@@ -155,20 +164,19 @@ service cloud.firestore {
       }
 
       match /workCategories/{categoryId} {
-        allow read: if isCompanyStaffSide(companyId)
-          || isWorkspaceMember(companyId)
-          || isTenantAdmin(companyId);
+        allow read: if canAccessTenant(companyId);
         allow write: if isTenantAdmin(companyId);
       }
 
       match /reminders/{reminderId} {
-        allow read, write: if isCompanyStaffSide(companyId)
-          || isWorkspaceMember(companyId)
-          || isTenantAdmin(companyId);
+        allow read, write: if canAccessTenant(companyId);
       }
 
       match /projects/{projectId} {
+        // Tenant admins / active workspace members can list & open all projects.
+        // Assigned staff/clients keep narrower access via company user mirror.
         allow read: if isTenantAdmin(companyId)
+          || isWorkspaceMember(companyId)
           || (hasCompanyUser(companyId)
               && companyProfile(companyId).role == 'staff'
               && (
@@ -212,46 +220,30 @@ service cloud.firestore {
         }
 
         match /schedule/{itemId} {
-          allow read: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId)
+          allow read: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
                 && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
-          allow write: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId);
+          allow write: if canAccessTenant(companyId);
         }
 
         match /dailyPlans/{planId} {
-          allow read: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId)
+          allow read: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
                 && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
-          allow write: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId);
+          allow write: if canAccessTenant(companyId);
         }
 
         match /updates/{updateId} {
-          allow read: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId)
+          allow read: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
                 && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
                 && resource.data.visibility == 'client_visible');
-          allow create: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId);
-          allow update, delete: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId);
+          allow create: if canAccessTenant(companyId);
+          allow update, delete: if canAccessTenant(companyId);
         }
 
         match /media/{mediaId} {
-          allow read: if (isTenantAdmin(companyId)
-              || isCompanyStaffSide(companyId)
-              || isWorkspaceMember(companyId)
+          allow read: if (canAccessTenant(companyId)
               || (isCompanyClient(companyId)
                   && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
                   && (
@@ -264,18 +256,14 @@ service cloud.firestore {
             );
 
           // Photos may be created by staff clients; Bunny videos are Admin SDK only.
-          allow create: if (isTenantAdmin(companyId)
-              || isCompanyStaffSide(companyId)
-              || isWorkspaceMember(companyId))
+          allow create: if canAccessTenant(companyId)
             && (
               !('provider' in request.resource.data)
               || request.resource.data.provider != 'BUNNY_STREAM'
             )
             && !('bunnyVideoId' in request.resource.data);
 
-          allow update: if (isTenantAdmin(companyId)
-              || isCompanyStaffSide(companyId)
-              || isWorkspaceMember(companyId))
+          allow update: if canAccessTenant(companyId)
             && !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny([
                 'bunnyVideoId', 'bunnyLibraryId', 'provider',
@@ -288,31 +276,23 @@ service cloud.firestore {
         }
 
         match /purchases/{purchaseId} {
-          allow read: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId)
+          allow read: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
                 && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
 
-          allow create: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId)
+          allow create: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
                 && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
                 && request.resource.data.purchaseResponsibility == 'OWNER'
                 && request.resource.data.projectId == projectId);
 
-          allow update: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId)
+          allow update: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
                 && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
                 && resource.data.purchaseResponsibility == 'OWNER'
                 && request.resource.data.purchaseResponsibility == 'OWNER');
 
-          allow delete: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId);
+          allow delete: if canAccessTenant(companyId);
         }
       }
     }

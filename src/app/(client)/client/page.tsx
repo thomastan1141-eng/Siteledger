@@ -188,6 +188,7 @@ export default function ClientOverviewPage() {
         <div style={{ marginTop: 18 }}>
           <MonthWorkCalendar
             projectId={project.id}
+            workspaceId={project.workspaceId || project.companyId}
             stages={ordered}
             editable={false}
             clientVisibleOnly
