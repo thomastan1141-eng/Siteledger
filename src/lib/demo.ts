@@ -63,6 +63,10 @@ export const DEMO_ADMIN: AppUser = {
   displayName: "Demo Admin",
   role: "admin",
   companyId: COMPANY_ID,
+  defaultWorkspaceId: COMPANY_ID,
+  onboardingComplete: true,
+  emailVerified: true,
+  studioName: "Demo Studio",
   projectIds: [
     "demo-berwick",
     "demo-orchid",

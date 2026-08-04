@@ -12,6 +12,7 @@ import {
 } from "@/components/progress/primitives";
 import { COMMON_STAGE_OPTIONS } from "@/lib/constants";
 import { useAuth } from "@/lib/auth-context";
+import { useWorkspace } from "@/lib/workspace-context";
 import { createProject } from "@/lib/services/projects";
 import { createManyStages } from "@/lib/services/schedule";
 import type { ProjectStatus } from "@/lib/types";
@@ -34,9 +35,11 @@ const emptyCustom = (): CustomDraft => ({
 
 export default function NewProjectPage() {
   const { profile } = useAuth();
+  const { workspaceId } = useWorkspace();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
   const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
   const [customs, setCustoms] = useState<CustomDraft[]>([]);
   const [customDraft, setCustomDraft] = useState<CustomDraft>(emptyCustom());
@@ -62,19 +65,24 @@ export default function NewProjectPage() {
     e.preventDefault();
     setBusy(true);
     setError("");
+    setWarning("");
     try {
-      const project = await createProject({
+      const { project, photoWarning } = await createProject({
+        workspaceId: workspaceId || profile?.defaultWorkspaceId || undefined,
+        createdBy: profile?.uid || null,
+        updatedBy: profile?.uid || null,
         clientName: form.clientName,
         manager: form.manager,
         address: form.address,
-        startDate: form.startDate || undefined,
-        contractCompletionDate: form.contractCompletionDate || undefined,
-        forecastCompletionDate:
-          form.forecastCompletionDate || form.contractCompletionDate || undefined,
-        status: form.status,
+        startDate: form.startDate || null,
+        contractCompletionDate: form.contractCompletionDate || null,
+        forecastCompletionDate: form.forecastCompletionDate || null,
+        status: form.status || "upcoming",
         internalNotes: form.internalNotes,
         allowStaffPublish: form.allowStaffPublish,
       });
+
+      if (photoWarning) setWarning(photoWarning);
 
       const stageInputs = [
         ...selectedPresets.map((name) => ({
@@ -94,12 +102,24 @@ export default function NewProjectPage() {
       ];
 
       if (stageInputs.length) {
-        await createManyStages(project.id, stageInputs, profile?.uid);
+        try {
+          await createManyStages(project.id, stageInputs, profile?.uid);
+        } catch (stageErr) {
+          console.error("[createProject stages]", stageErr);
+          setWarning(
+            (photoWarning ? `${photoWarning} ` : "") +
+              "Stages could not be saved. You can add them later.",
+          );
+        }
       }
 
       router.push(`/projects/${project.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create project");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "We could not create the project. Please try again.",
+      );
     } finally {
       setBusy(false);
     }
@@ -124,7 +144,7 @@ export default function NewProjectPage() {
       <SitePageHeader
         kicker="New site"
         title="Open a project journal"
-        description="Set the contract date, forecast date, and who’s running the site."
+        description="You can create the project now and complete the details later."
       />
 
       <form
@@ -140,7 +160,7 @@ export default function NewProjectPage() {
           <SiteInput
             value={form.clientName}
             onChange={(e) => set("clientName", e.target.value)}
-            required
+            placeholder="Optional"
           />
         </SiteField>
         <SiteField label="Manager">
@@ -155,7 +175,6 @@ export default function NewProjectPage() {
             <SiteInput
               value={form.address}
               onChange={(e) => set("address", e.target.value)}
-              required
               placeholder="e.g. 19 Burnfoot Terrace"
             />
           </SiteField>
@@ -352,6 +371,11 @@ export default function NewProjectPage() {
         {error ? (
           <p style={{ gridColumn: "1 / -1", color: "var(--site-danger)" }}>
             {error}
+          </p>
+        ) : null}
+        {warning ? (
+          <p style={{ gridColumn: "1 / -1", color: "var(--site-text-secondary)" }}>
+            {warning}
           </p>
         ) : null}
         <div style={{ gridColumn: "1 / -1", display: "flex", gap: 10 }}>

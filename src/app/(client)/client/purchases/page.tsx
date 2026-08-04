@@ -13,7 +13,7 @@ export default function ClientPurchasesPage() {
       <SitePageHeader
         kicker="Purchases"
         title={getProjectDisplayName(project)}
-        description={project.clientName}
+        description={project.clientName || undefined}
       />
       <PurchasesPanel project={project} clientMode />
     </div>

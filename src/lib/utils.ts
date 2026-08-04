@@ -16,15 +16,26 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Primary project title — address first, then legacy name. */
-export function getProjectDisplayName(
+/** Primary project title — address, else Untitled project. */
+export function getProjectDisplayTitle(
   project?: Pick<Project, "address" | "name"> | null,
 ) {
   const address = (project?.address || "").trim();
   if (address) return address;
-  const legacy = (project?.name || "").trim();
-  if (legacy) return legacy;
   return "Untitled project";
+}
+
+/** Alias — address title only (legacy projectName is not used for display). */
+export function getProjectDisplayName(
+  project?: Pick<Project, "address" | "name"> | null,
+) {
+  return getProjectDisplayTitle(project);
+}
+
+export function isProjectIncomplete(
+  project?: Pick<Project, "address" | "clientName"> | null,
+) {
+  return !(project?.address || "").trim() || !(project?.clientName || "").trim();
 }
 
 export function getProjectManagerName(

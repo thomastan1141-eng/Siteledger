@@ -8,6 +8,7 @@ import {
   HardDrive,
   LayoutGrid,
   LogOut,
+  UserRound,
   Users,
 } from "lucide-react";
 import { PLATFORM_KICKER, PLATFORM_NAME } from "@/lib/constants";
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/media", label: "Media", icon: Camera },
   { href: "/clients", label: "People", icon: Users },
   { href: "/storage", label: "Storage", icon: HardDrive },
+  { href: "/account", label: "Account", icon: UserRound },
 ];
 
 const DOCK = NAV.slice(0, 4);

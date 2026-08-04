@@ -1,5 +1,18 @@
 export type UserRole = "admin" | "staff" | "client";
 
+export type WorkspacePlan = "FREE" | "TRIAL" | "STARTER" | "PRO";
+
+export type SubscriptionStatus =
+  | "NONE"
+  | "TRIALING"
+  | "ACTIVE"
+  | "PAST_DUE"
+  | "CANCELLED";
+
+export type WorkspaceMemberRole = "OWNER" | "ADMIN" | "STAFF";
+
+export type WorkspaceMemberStatus = "ACTIVE" | "INVITED" | "DISABLED";
+
 export type ProjectStatus =
   | "upcoming"
   | "in_progress"
@@ -26,15 +39,44 @@ export type ForecastStatus =
   | "delayed"
   | "ahead";
 
+/** SaaS account profile at users/{uid}. Also mirrored under companies/{workspaceId}/users for staff/client ops. */
 export interface AppUser {
   uid: string;
   email: string;
   displayName: string;
   role: UserRole;
+  /** Legacy tenant path key — equals workspaceId for studio accounts. */
   companyId: string;
+  /** Preferred workspace for studio owners / staff. */
+  defaultWorkspaceId?: string;
+  studioName?: string | null;
+  onboardingComplete?: boolean;
+  emailVerified?: boolean;
   projectIds: string[];
   createdAt: string;
+  updatedAt?: string;
   active: boolean;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  ownerUid: string;
+  plan: WorkspacePlan;
+  subscriptionStatus: SubscriptionStatus;
+  trialStartsAt: string | null;
+  trialEndsAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceMember {
+  uid: string;
+  email: string;
+  displayName: string | null;
+  role: WorkspaceMemberRole;
+  status: WorkspaceMemberStatus;
+  createdAt: string;
 }
 
 export interface Project3DImage {
@@ -49,36 +91,40 @@ export interface Project3DImage {
 export interface Project {
   id: string;
   companyId: string;
-  /** @deprecated legacy title — use address / getProjectDisplayName */
-  name?: string;
+  /** Multi-tenant workspace scope — required on new projects. */
+  workspaceId?: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
+  /** @deprecated legacy title — use address / getProjectDisplayTitle */
+  name?: string | null;
   /** @deprecated legacy code — no longer collected or shown */
-  code?: string;
-  clientName: string;
+  code?: string | null;
+  clientName?: string | null;
   /** Primary project title / identifier */
-  address: string;
-  coverPhotoUrl?: string;
+  address?: string | null;
+  coverPhotoUrl?: string | null;
   /** External 3D tour / Matterport / Kuula / similar link */
-  tour3dUrl?: string;
-  tour3dLabel?: string;
+  tour3dUrl?: string | null;
+  tour3dLabel?: string | null;
   /** Uploaded 3D / panorama stills shown on overview */
   images3d?: Project3DImage[];
   /** Which 3D image is shown as the overview hero */
   overview3dImageId?: string;
-  startDate?: string;
-  contractCompletionDate?: string;
-  forecastCompletionDate?: string;
-  actualCompletionDate?: string;
+  startDate?: string | null;
+  contractCompletionDate?: string | null;
+  forecastCompletionDate?: string | null;
+  actualCompletionDate?: string | null;
   /** Free-text manager name */
-  manager?: string;
+  manager?: string | null;
   /** @deprecated prefer manager */
-  managerId?: string;
+  managerId?: string | null;
   /** @deprecated prefer manager — kept for older records */
-  managerName?: string;
+  managerName?: string | null;
   status: ProjectStatus;
   forecastStatus: ForecastStatus;
   clientUserIds: string[];
   staffIds: string[];
-  internalNotes?: string;
+  internalNotes?: string | null;
   dailyReminderHour?: number;
   staleDaysThreshold: number;
   allowStaffPublish: boolean;

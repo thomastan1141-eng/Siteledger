@@ -40,7 +40,7 @@ export default function ClientOverviewPage() {
       <SitePageHeader
         kicker="Project overview"
         title={getProjectDisplayName(project)}
-        description={project.address}
+        description={project.address || undefined}
       />
 
       <div className="site-hero-panel">
@@ -48,7 +48,7 @@ export default function ClientOverviewPage() {
           {getOverviewDisplayImage(project) ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={getOverviewDisplayImage(project)}
+              src={getOverviewDisplayImage(project) || undefined}
               alt={getProjectDisplayName(project)}
             />
           ) : null}

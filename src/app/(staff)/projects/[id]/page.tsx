@@ -48,7 +48,7 @@ import {
   formatBytes,
   formatDate,
   formatDateTime,
-  getProjectDisplayName,
+  getProjectDisplayTitle,
   getProjectManagerName,
 } from "@/lib/utils";
 
@@ -133,8 +133,6 @@ export default function ProjectDetailsPage() {
   async function saveSettings(e: FormEvent) {
     e.preventDefault();
     if (!project || profile?.role !== "admin") return;
-    if (!edit.address.trim()) return;
-    if (!edit.clientName.trim()) return;
     setSaving(true);
     try {
       setProject(
@@ -183,8 +181,8 @@ export default function ProjectDetailsPage() {
               {getOverviewDisplayImage(project) ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={getOverviewDisplayImage(project)}
-                  alt={getProjectDisplayName(project)}
+                  src={getOverviewDisplayImage(project) || undefined}
+                  alt={getProjectDisplayTitle(project)}
                 />
               ) : null}
               <div className="site-hero-visual-copy">
@@ -414,7 +412,6 @@ export default function ProjectDetailsPage() {
                   setEdit((s) => ({ ...s, clientName: e.target.value }))
                 }
                 disabled={profile?.role !== "admin"}
-                required
               />
             </SiteField>
             <SiteField label="Manager">
@@ -435,7 +432,6 @@ export default function ProjectDetailsPage() {
                     setEdit((s) => ({ ...s, address: e.target.value }))
                   }
                   disabled={profile?.role !== "admin"}
-                  required
                   placeholder="e.g. 19 Burnfoot Terrace"
                 />
               </SiteField>

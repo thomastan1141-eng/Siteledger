@@ -13,8 +13,9 @@ import {
 import type { Project } from "@/lib/types";
 import {
   formatDate,
-  getProjectDisplayName,
+  getProjectDisplayTitle,
   getProjectManagerName,
+  isProjectIncomplete,
 } from "@/lib/utils";
 
 export type ProjectTabKey =
@@ -53,8 +54,8 @@ export function ProjectChrome({
   return (
     <>
       <SitePageHeader
-        kicker={project.clientName}
-        title={getProjectDisplayName(project)}
+        kicker={project.clientName || "Project"}
+        title={getProjectDisplayTitle(project)}
         description={
           getProjectManagerName(project)
             ? `Manager · ${getProjectManagerName(project)}`
@@ -64,6 +65,7 @@ export function ProjectChrome({
       />
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 22 }}>
+        {isProjectIncomplete(project) ? <SitePill>Draft</SitePill> : null}
         <ProjectStatusPill status={project.status} />
         <ForecastPill status={project.forecastStatus} />
         <SitePill>Forecast {formatDate(project.forecastCompletionDate)}</SitePill>

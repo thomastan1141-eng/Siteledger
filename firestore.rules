@@ -5,140 +5,241 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function userDoc() {
-      return get(/databases/$(database)/documents/companies/siteledger/users/$(request.auth.uid));
+    function isVerifiedUser() {
+      return signedIn() && request.auth.token.email_verified == true;
     }
 
-    function profile() {
-      return userDoc().data;
+    function accountDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    function isActiveUser() {
-      return signedIn() && userDoc().exists && profile().active == true;
+    function hasAccount() {
+      return signedIn() && accountDoc().exists;
     }
 
-    function isAdmin() {
-      return isActiveUser() && profile().role == 'admin';
+    function account() {
+      return accountDoc().data;
     }
 
-    function isStaffSide() {
-      return isActiveUser() && (profile().role == 'admin' || profile().role == 'staff');
+    function memberDoc(workspaceId) {
+      return get(/databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid));
     }
 
-    function isClient() {
-      return isActiveUser() && profile().role == 'client';
+    function isWorkspaceMember(workspaceId) {
+      return isVerifiedUser()
+        && memberDoc(workspaceId).exists
+        && memberDoc(workspaceId).data.status == 'ACTIVE';
     }
 
-    function projectDoc(projectId) {
-      return get(/databases/$(database)/documents/companies/siteledger/projects/$(projectId)).data;
+    function isWorkspaceOwner(workspaceId) {
+      return isWorkspaceMember(workspaceId)
+        && memberDoc(workspaceId).data.role == 'OWNER';
     }
 
-    function canAccessProject(projectId) {
-      return isAdmin()
-        || (isStaffSide() && (
-          request.auth.uid in projectDoc(projectId).staffIds
-          || projectDoc(projectId).managerId == request.auth.uid
+    function companyUserDoc(companyId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)/users/$(request.auth.uid));
+    }
+
+    function hasCompanyUser(companyId) {
+      return signedIn() && companyUserDoc(companyId).exists
+        && companyUserDoc(companyId).data.active == true;
+    }
+
+    function companyProfile(companyId) {
+      return companyUserDoc(companyId).data;
+    }
+
+    function isCompanyAdmin(companyId) {
+      return hasCompanyUser(companyId) && companyProfile(companyId).role == 'admin';
+    }
+
+    function isCompanyStaffSide(companyId) {
+      return hasCompanyUser(companyId)
+        && companyProfile(companyId).role in ['admin', 'staff'];
+    }
+
+    function isCompanyClient(companyId) {
+      return hasCompanyUser(companyId) && companyProfile(companyId).role == 'client';
+    }
+
+    function projectDoc(companyId, projectId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)/projects/$(projectId)).data;
+    }
+
+    function canAccessProject(companyId, projectId) {
+      return isCompanyAdmin(companyId)
+        || (isCompanyStaffSide(companyId) && (
+          request.auth.uid in projectDoc(companyId, projectId).staffIds
+          || projectDoc(companyId, projectId).managerId == request.auth.uid
+          || isWorkspaceMember(companyId)
         ))
-        || (isClient() && request.auth.uid in projectDoc(projectId).clientUserIds);
+        || (isCompanyClient(companyId)
+            && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
     }
 
+    // ---- Top-level SaaS users ----
+    match /users/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create: if false; // created via Admin SDK onboarding
+      allow update: if signedIn() && request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny([
+              'role', 'active', 'defaultWorkspaceId', 'companyId',
+              'onboardingComplete', 'plan', 'subscriptionStatus'
+            ]);
+      allow delete: if false;
+    }
+
+    // ---- Workspaces ----
+    match /workspaces/{workspaceId} {
+      allow read: if isWorkspaceMember(workspaceId);
+      allow create: if false; // Admin SDK only
+      allow update: if isWorkspaceOwner(workspaceId)
+        && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny([
+              'ownerUid', 'plan', 'subscriptionStatus',
+              'trialStartsAt', 'trialEndsAt'
+            ]);
+      allow delete: if false;
+
+      match /members/{memberId} {
+        allow read: if isWorkspaceMember(workspaceId);
+        allow write: if false; // Admin SDK / future owner APIs
+      }
+    }
+
+    // ---- Tenant data (companyId == workspaceId) ----
     match /companies/{companyId} {
-      allow read: if isActiveUser() && companyId == 'siteledger';
-      allow write: if isAdmin() && companyId == 'siteledger';
+      allow read: if isWorkspaceMember(companyId) || hasCompanyUser(companyId);
+      allow write: if isCompanyAdmin(companyId) || isWorkspaceOwner(companyId);
 
       match /meta/{docId} {
         allow read: if signedIn();
+        // Legacy bootstrap retained for existing admin migration path.
         allow create: if signedIn()
-          && companyId == 'siteledger'
           && docId == 'setup'
-          && !exists(/databases/$(database)/documents/companies/siteledger/meta/setup)
+          && !exists(/databases/$(database)/documents/companies/$(companyId)/meta/setup)
           && request.resource.data.adminUid == request.auth.uid
           && request.resource.data.completed == true;
-        allow update, delete: if isAdmin();
+        allow update, delete: if isCompanyAdmin(companyId);
       }
 
       match /users/{userId} {
-        allow read: if isStaffSide() || (signedIn() && request.auth.uid == userId);
-        // Admin invites others; first signed-in user may self-create as admin once.
-        allow create: if isAdmin()
+        allow read: if isCompanyStaffSide(companyId)
+          || (signedIn() && request.auth.uid == userId);
+        allow create: if isCompanyAdmin(companyId)
           || (signedIn()
               && request.auth.uid == userId
-              && companyId == 'siteledger'
               && request.resource.data.role == 'admin'
-              && request.resource.data.companyId == 'siteledger'
+              && request.resource.data.companyId == companyId
               && request.resource.data.active == true
-              && !exists(/databases/$(database)/documents/companies/siteledger/meta/setup));
-        allow update: if isAdmin()
+              && !exists(/databases/$(database)/documents/companies/$(companyId)/meta/setup));
+        allow update: if isCompanyAdmin(companyId)
           || (signedIn() && request.auth.uid == userId
               && !request.resource.data.diff(resource.data).affectedKeys()
                   .hasAny(['role', 'active', 'companyId', 'projectIds']));
-        allow delete: if isAdmin();
+        allow delete: if isCompanyAdmin(companyId);
       }
 
       match /workCategories/{categoryId} {
-        allow read: if isStaffSide();
-        allow write: if isAdmin();
+        allow read: if isCompanyStaffSide(companyId) || isWorkspaceMember(companyId);
+        allow write: if isCompanyAdmin(companyId);
       }
 
       match /reminders/{reminderId} {
-        allow read: if isStaffSide();
-        allow write: if isStaffSide();
+        allow read, write: if isCompanyStaffSide(companyId) || isWorkspaceMember(companyId);
       }
 
       match /projects/{projectId} {
-        allow read: if isStaffSide()
-          || (isClient() && request.auth.uid in resource.data.clientUserIds);
-        allow create, delete: if isAdmin();
-        allow update: if isAdmin() || isStaffSide();
+        allow read: if isCompanyStaffSide(companyId)
+          || isWorkspaceMember(companyId)
+          || (isCompanyClient(companyId)
+              && request.auth.uid in resource.data.clientUserIds);
+
+        allow create: if (isCompanyAdmin(companyId) || isWorkspaceOwner(companyId))
+          && request.resource.data.workspaceId == companyId
+          && request.resource.data.companyId == companyId
+          && request.resource.data.createdBy == request.auth.uid;
+
+        allow update: if (isCompanyAdmin(companyId)
+            || isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId))
+          && request.resource.data.companyId == resource.data.companyId
+          // workspaceId / createdBy immutable once set; may be stamped on legacy docs.
+          && (
+            !('workspaceId' in resource.data)
+            || resource.data.workspaceId == null
+            || request.resource.data.workspaceId == resource.data.workspaceId
+          )
+          && (
+            !('createdBy' in resource.data)
+            || resource.data.createdBy == null
+            || request.resource.data.createdBy == resource.data.createdBy
+          );
+
+        allow delete: if isCompanyAdmin(companyId) || isWorkspaceOwner(companyId);
 
         match /schedule/{itemId} {
-          allow read: if isStaffSide()
-            || (isClient() && request.auth.uid in projectDoc(projectId).clientUserIds);
-          allow write: if isStaffSide();
+          allow read: if isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId)
+            || (isCompanyClient(companyId)
+                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
+          allow write: if isCompanyStaffSide(companyId) || isWorkspaceMember(companyId);
         }
 
         match /dailyPlans/{planId} {
-          allow read: if isStaffSide()
-            || (isClient() && request.auth.uid in projectDoc(projectId).clientUserIds);
-          allow write: if isStaffSide();
+          allow read: if isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId)
+            || (isCompanyClient(companyId)
+                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
+          allow write: if isCompanyStaffSide(companyId) || isWorkspaceMember(companyId);
         }
 
         match /updates/{updateId} {
-          allow read: if isStaffSide()
-            || (isClient()
-                && request.auth.uid in projectDoc(projectId).clientUserIds
+          allow read: if isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId)
+            || (isCompanyClient(companyId)
+                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
                 && resource.data.visibility == 'client_visible');
-          allow create: if isStaffSide();
-          allow update, delete: if isAdmin();
+          allow create: if isCompanyStaffSide(companyId) || isWorkspaceMember(companyId);
+          allow update, delete: if isCompanyAdmin(companyId)
+            || isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId);
         }
 
         match /media/{mediaId} {
-          allow read: if isStaffSide()
-            || (isClient()
-                && request.auth.uid in projectDoc(projectId).clientUserIds
+          allow read: if isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId)
+            || (isCompanyClient(companyId)
+                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
                 && resource.data.visibility in ['client_visible', 'handover']);
-          allow create: if isStaffSide();
-          allow update, delete: if isAdmin() || isStaffSide();
+          allow create: if isCompanyStaffSide(companyId) || isWorkspaceMember(companyId);
+          allow update, delete: if isCompanyAdmin(companyId)
+            || isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId);
         }
 
         match /purchases/{purchaseId} {
-          allow read: if isStaffSide()
-            || (isClient()
-                && request.auth.uid in projectDoc(projectId).clientUserIds);
+          allow read: if isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId)
+            || (isCompanyClient(companyId)
+                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
 
-          allow create: if isStaffSide()
-            || (isClient()
-                && request.auth.uid in projectDoc(projectId).clientUserIds
+          allow create: if isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId)
+            || (isCompanyClient(companyId)
+                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
                 && request.resource.data.purchaseResponsibility == 'OWNER'
                 && request.resource.data.projectId == projectId);
 
-          allow update: if isStaffSide()
-            || (isClient()
-                && request.auth.uid in projectDoc(projectId).clientUserIds
+          allow update: if isCompanyStaffSide(companyId)
+            || isWorkspaceMember(companyId)
+            || (isCompanyClient(companyId)
+                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
                 && resource.data.purchaseResponsibility == 'OWNER'
                 && request.resource.data.purchaseResponsibility == 'OWNER');
 
-          allow delete: if isStaffSide();
+          allow delete: if isCompanyStaffSide(companyId) || isWorkspaceMember(companyId);
         }
       }
     }

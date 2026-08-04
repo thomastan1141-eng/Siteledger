@@ -13,23 +13,46 @@ import {
   signInWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  updateProfile,
   type User,
 } from "firebase/auth";
 import { AUTH_BYPASS, DEMO_ADMIN, DEMO_CLIENT } from "./demo";
 import { getFirebaseAuth, isFirebaseConfigured } from "./firebase";
+import { friendlyAuthError } from "./auth-errors";
 import {
+  completeOnboardingClient,
   ensureBootstrapAdmin,
   getUserProfile,
 } from "./services/users";
 import type { AppUser, UserRole } from "./types";
 
+type SignupInput = {
+  email: string;
+  password: string;
+  displayName?: string;
+  studioName?: string;
+};
+
 type AuthContextValue = {
   user: User | null;
   profile: AppUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<AppUser>;
+  emailVerified: boolean;
+  needsEmailVerification: boolean;
+  needsOnboarding: boolean;
+  login: (email: string, password: string) => Promise<AppUser | null>;
+  signup: (input: SignupInput) => Promise<User>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  resendVerification: () => Promise<void>;
+  reloadVerified: () => Promise<boolean>;
+  completeOnboarding: (input?: {
+    studioName?: string;
+    displayName?: string;
+  }) => Promise<string>;
+  refreshProfile: () => Promise<AppUser | null>;
   hasRole: (...roles: UserRole[]) => boolean;
   isStaffSide: boolean;
   isClient: boolean;
@@ -46,9 +69,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const [loading, setLoading] = useState(!AUTH_BYPASS);
 
+  async function loadProfile(next: User | null) {
+    if (!next) {
+      setProfile(null);
+      return null;
+    }
+    const p = await getUserProfile(next.uid);
+    setProfile(p);
+    return p;
+  }
+
   useEffect(() => {
     if (AUTH_BYPASS) {
-      setProfile(DEMO_ADMIN);
+      // Demo profile seed — intentional sync set for bypass mode.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- AUTH_BYPASS bootstrap
+      setProfile({
+        ...DEMO_ADMIN,
+        defaultWorkspaceId: DEMO_ADMIN.companyId,
+        onboardingComplete: true,
+        emailVerified: true,
+      });
       setLoading(false);
       return;
     }
@@ -58,44 +98,110 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const unsub = onAuthStateChanged(getFirebaseAuth(), async (next) => {
       setUser(next);
-      if (next) {
-        const p = await getUserProfile(next.uid);
-        setProfile(p);
-      } else {
-        setProfile(null);
-      }
+      await loadProfile(next);
       setLoading(false);
     });
     return () => unsub();
   }, []);
+
+  const emailVerified = AUTH_BYPASS ? true : Boolean(user?.emailVerified);
+  // Existing provisioned staff/clients keep access even if Auth emailVerified is false.
+  const needsEmailVerification = Boolean(
+    user &&
+      !emailVerified &&
+      !(profile?.active && (profile.role === "admin" || profile.role === "staff" || profile.role === "client")),
+  );
+  // New verified signups (no profile yet) or incomplete SaaS onboarding.
+  const needsOnboarding = Boolean(
+    user &&
+      !needsEmailVerification &&
+      profile?.role !== "client" &&
+      (!profile || profile.onboardingComplete === false),
+  );
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user: AUTH_BYPASS ? ({ uid: profile?.uid || "demo" } as User) : user,
       profile,
       loading,
+      emailVerified,
+      needsEmailVerification,
+      needsOnboarding,
       async login(email, password) {
         if (AUTH_BYPASS) return profile || DEMO_ADMIN;
         if (!isFirebaseConfigured) {
           throw new Error("Firebase is not configured. Add .env.local first.");
         }
-        const cred = await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
-        let p = await getUserProfile(cred.user.uid);
-        if (!p) {
-          p = await ensureBootstrapAdmin({
-            uid: cred.user.uid,
-            email: cred.user.email || email,
-            displayName: cred.user.displayName || undefined,
-          });
-        }
-        if (!p || !p.active) {
-          await signOut(getFirebaseAuth());
+        try {
+          const cred = await signInWithEmailAndPassword(
+            getFirebaseAuth(),
+            email,
+            password,
+          );
+          let p = await getUserProfile(cred.user.uid);
+          if (!p && cred.user.emailVerified) {
+            // Legacy first-admin bootstrap only when verified.
+            p = await ensureBootstrapAdmin({
+              uid: cred.user.uid,
+              email: cred.user.email || email,
+              displayName: cred.user.displayName || undefined,
+            });
+          }
+          if (p && !p.active) {
+            await signOut(getFirebaseAuth());
+            throw new Error(
+              "This account has been disabled. Contact support if you need help.",
+            );
+          }
+          setUser(cred.user);
+          setProfile(p);
+          return p;
+        } catch (err) {
           throw new Error(
-            "Account is inactive or not provisioned. Ask an admin to invite you.",
+            friendlyAuthError(err, "We could not sign you in. Please try again."),
           );
         }
-        setProfile(p);
-        return p;
+      },
+      async signup(input) {
+        if (AUTH_BYPASS) {
+          throw new Error("Signup is disabled in preview mode.");
+        }
+        if (!isFirebaseConfigured) {
+          throw new Error("Firebase is not configured. Add .env.local first.");
+        }
+        try {
+          const cred = await createUserWithEmailAndPassword(
+            getFirebaseAuth(),
+            input.email.trim(),
+            input.password,
+          );
+          if (input.displayName?.trim()) {
+            await updateProfile(cred.user, {
+              displayName: input.displayName.trim(),
+            });
+          }
+          await sendEmailVerification(cred.user);
+          // Stash studio name on localStorage until onboarding after verify.
+          if (typeof window !== "undefined") {
+            window.sessionStorage.setItem(
+              "siteledger.pendingSignup",
+              JSON.stringify({
+                studioName: input.studioName?.trim() || "",
+                displayName: input.displayName?.trim() || "",
+              }),
+            );
+          }
+          setUser(cred.user);
+          setProfile(null);
+          return cred.user;
+        } catch (err) {
+          throw new Error(
+            friendlyAuthError(
+              err,
+              "We could not create your account. Please check the information and try again.",
+            ),
+          );
+        }
       },
       async logout() {
         if (AUTH_BYPASS) {
@@ -104,10 +210,79 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         await signOut(getFirebaseAuth());
         setProfile(null);
+        setUser(null);
       },
       async resetPassword(email) {
         if (AUTH_BYPASS) return;
-        await sendPasswordResetEmail(getFirebaseAuth(), email);
+        try {
+          await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
+        } catch (err) {
+          // Always appear neutral to the caller for enumeration safety.
+          console.error("[resetPassword]", err);
+          const code =
+            typeof err === "object" && err && "code" in err
+              ? String((err as { code?: string }).code)
+              : "";
+          if (code === "auth/too-many-requests") {
+            throw new Error(
+              "Too many attempts. Please wait a moment and try again.",
+            );
+          }
+          if (code === "auth/network-request-failed") {
+            throw new Error(
+              "Network error. Check your connection and try again.",
+            );
+          }
+        }
+      },
+      async resendVerification() {
+        const current = getFirebaseAuth().currentUser;
+        if (!current) throw new Error("Please sign in again.");
+        await sendEmailVerification(current);
+      },
+      async reloadVerified() {
+        const current = getFirebaseAuth().currentUser;
+        if (!current) return false;
+        await current.reload();
+        const verified = Boolean(getFirebaseAuth().currentUser?.emailVerified);
+        setUser(getFirebaseAuth().currentUser);
+        return verified;
+      },
+      async completeOnboarding(input) {
+        const current = getFirebaseAuth().currentUser;
+        if (!current) throw new Error("Please sign in again.");
+        await current.reload();
+        if (!current.emailVerified) {
+          throw new Error("Please verify your email before continuing.");
+        }
+        const token = await current.getIdToken(true);
+        let pending: { studioName?: string; displayName?: string } = {};
+        if (typeof window !== "undefined") {
+          try {
+            pending = JSON.parse(
+              window.sessionStorage.getItem("siteledger.pendingSignup") || "{}",
+            );
+          } catch {
+            pending = {};
+          }
+        }
+        const result = await completeOnboardingClient(token, {
+          studioName: input?.studioName || pending.studioName,
+          displayName: input?.displayName || pending.displayName,
+          migrateLegacy: true,
+        });
+        if (typeof window !== "undefined") {
+          window.sessionStorage.removeItem("siteledger.pendingSignup");
+        }
+        await loadProfile(current);
+        return result.workspaceId || "";
+      },
+      async refreshProfile() {
+        const current = AUTH_BYPASS
+          ? null
+          : getFirebaseAuth().currentUser;
+        if (AUTH_BYPASS) return profile;
+        return loadProfile(current);
       },
       hasRole(...roles) {
         return !!profile && roles.includes(profile.role);
@@ -120,7 +295,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(role === "client" ? DEMO_CLIENT : DEMO_ADMIN);
       },
     }),
-    [user, profile, loading],
+    [user, profile, loading, emailVerified, needsEmailVerification, needsOnboarding],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

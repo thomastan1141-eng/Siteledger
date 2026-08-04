@@ -1,10 +1,11 @@
 "use client";
 
 import { FormEvent, Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PLATFORM_KICKER, PLATFORM_NAME } from "@/lib/constants";
 import { useAuth } from "@/lib/auth-context";
 import { AUTH_BYPASS } from "@/lib/demo";
+import { AuthShell } from "@/components/auth-shell";
 import {
   SiteButton,
   SiteField,
@@ -12,38 +13,76 @@ import {
   SiteSpinner,
 } from "@/components/progress/primitives";
 
+function postLoginPath(
+  profileRole: string | undefined,
+  next: string | null,
+) {
+  if (next) return next;
+  return profileRole === "client" ? "/client" : "/dashboard";
+}
+
 function LoginForm() {
-  const { login, resetPassword, profile, loading } = useAuth();
+  const {
+    login,
+    profile,
+    loading,
+    user,
+    needsEmailVerification,
+    needsOnboarding,
+  } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (AUTH_BYPASS) router.replace("/dashboard");
-  }, [router]);
-
-  if (!loading && profile && !AUTH_BYPASS) {
-    router.replace(
-      params.get("next") ||
-        (profile.role === "client" ? "/client" : "/dashboard"),
-    );
-  }
+    if (AUTH_BYPASS) {
+      router.replace("/dashboard");
+      return;
+    }
+    if (loading) return;
+    if (!user) return;
+    if (needsEmailVerification || needsOnboarding) {
+      router.replace("/verify-email");
+      return;
+    }
+    if (profile) {
+      router.replace(postLoginPath(profile.role, params.get("next")));
+    }
+  }, [
+    loading,
+    user,
+    profile,
+    needsEmailVerification,
+    needsOnboarding,
+    router,
+    params,
+  ]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
-    setInfo("");
     try {
       const p = await login(email.trim(), password);
-      router.replace(
-        params.get("next") ||
-          (p.role === "client" ? "/client" : "/dashboard"),
-      );
+      // Auth state effect will route; keep a direct path for UX.
+      const { getFirebaseAuth } = await import("@/lib/firebase");
+      const current = getFirebaseAuth().currentUser;
+      if (!current?.emailVerified && (!p || p.role !== "client")) {
+        router.replace("/verify-email");
+        return;
+      }
+      if (p && p.role !== "client" && !p.onboardingComplete) {
+        router.replace("/verify-email");
+        return;
+      }
+      if (!p) {
+        router.replace("/verify-email");
+        return;
+      }
+      router.replace(postLoginPath(p.role, params.get("next")));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -51,96 +90,71 @@ function LoginForm() {
     }
   }
 
-  if (AUTH_BYPASS) return <SiteSpinner label="Opening workspace…" />;
+  if (
+    AUTH_BYPASS ||
+    (!loading &&
+      user &&
+      profile &&
+      !needsEmailVerification &&
+      !needsOnboarding)
+  ) {
+    return <SiteSpinner label="Opening workspace…" />;
+  }
 
   return (
-    <div
-      className="site-app"
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: 24,
-      }}
+    <AuthShell
+      title="Sign in"
+      description="Access your studio workspace and project journals."
     >
-      <div style={{ width: "100%", maxWidth: 420 }}>
-        <div style={{ marginBottom: 28 }}>
-          <div className="site-brand-kicker">{PLATFORM_KICKER}</div>
-          <h1
-            className="site-page-title"
-            style={{ fontSize: 36, marginTop: 8 }}
-          >
-            {PLATFORM_NAME}
-          </h1>
-          <p className="site-page-desc">
-            Sign in with your Firebase account. The first login creates the
-            admin profile automatically.
-          </p>
-        </div>
-
-        <form
-          onSubmit={onSubmit}
-          style={{ display: "grid", gap: 14 }}
+      <form onSubmit={onSubmit} style={{ display: "grid", gap: 14 }}>
+        <SiteField label="Email">
+          <SiteInput
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </SiteField>
+        <SiteField label="Password">
+          <SiteInput
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </SiteField>
+        {error ? (
+          <p style={{ color: "var(--site-danger)", fontSize: 14 }}>{error}</p>
+        ) : null}
+        <SiteButton type="submit" variant="accent" disabled={busy}>
+          {busy ? "Signing in…" : "Sign in"}
+        </SiteButton>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            fontSize: 13,
+          }}
         >
-          <SiteField label="Email">
-            <SiteInput
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </SiteField>
-          <SiteField label="Password">
-            <SiteInput
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </SiteField>
-          {error ? (
-            <p style={{ color: "var(--site-danger)", fontSize: 14 }}>{error}</p>
-          ) : null}
-          {info ? (
-            <p style={{ color: "var(--site-success)", fontSize: 14 }}>{info}</p>
-          ) : null}
-          <SiteButton type="submit" variant="accent" disabled={busy}>
-            {busy ? "Signing in…" : "Sign in"}
-          </SiteButton>
-          <button
-            type="button"
-            onClick={async () => {
-              if (!email.trim()) {
-                setError("Enter your email first.");
-                return;
-              }
-              setBusy(true);
-              try {
-                await resetPassword(email.trim());
-                setInfo("Password reset email sent.");
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Reset failed");
-              } finally {
-                setBusy(false);
-              }
-            }}
-            style={{
-              background: "none",
-              border: 0,
-              color: "var(--site-text-secondary)",
-              fontSize: 13,
-              cursor: "pointer",
-              textDecoration: "underline",
-              textUnderlineOffset: 3,
-            }}
+          <Link
+            href="/forgot-password"
+            style={{ color: "var(--site-text-secondary)" }}
           >
             Forgot password?
-          </button>
-        </form>
-      </div>
-    </div>
+          </Link>
+          <span style={{ color: "var(--site-text-secondary)" }}>
+            New to SiteLedger?{" "}
+            <Link href="/signup" style={{ color: "inherit", fontWeight: 600 }}>
+              Create an account
+            </Link>
+          </span>
+        </div>
+      </form>
+    </AuthShell>
   );
 }
 

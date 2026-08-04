@@ -14,13 +14,19 @@ export function AuthGate({
   children: React.ReactNode;
   roles: UserRole[];
 }) {
-  const { loading, profile, user, previewAs } = useAuth();
+  const {
+    loading,
+    profile,
+    user,
+    previewAs,
+    needsEmailVerification,
+    needsOnboarding,
+  } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
     if (AUTH_BYPASS) {
-      // Auto-switch demo role so staff/client routes both work.
       if (roles.includes("client") && profile?.role !== "client") {
         previewAs("client");
       } else if (
@@ -32,20 +38,45 @@ export function AuthGate({
       return;
     }
     if (loading) return;
-    if (!user || !profile) {
+    if (!user) {
       router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      return;
+    }
+    if (needsEmailVerification || needsOnboarding) {
+      router.replace("/verify-email");
+      return;
+    }
+    if (!profile) {
+      router.replace("/verify-email");
       return;
     }
     if (!roles.includes(profile.role)) {
       router.replace(profile.role === "client" ? "/client" : "/dashboard");
     }
-  }, [loading, user, profile, roles, router, pathname, previewAs]);
+  }, [
+    loading,
+    user,
+    profile,
+    roles,
+    router,
+    pathname,
+    previewAs,
+    needsEmailVerification,
+    needsOnboarding,
+  ]);
 
   if (AUTH_BYPASS) {
     return <>{children}</>;
   }
 
-  if (loading || !user || !profile || !roles.includes(profile.role)) {
+  if (
+    loading ||
+    !user ||
+    needsEmailVerification ||
+    needsOnboarding ||
+    !profile ||
+    !roles.includes(profile.role)
+  ) {
     return <SiteSpinner />;
   }
 

@@ -5,35 +5,44 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function userDoc() {
-      return firestore.get(/databases/(default)/documents/companies/siteledger/users/$(request.auth.uid));
+    function memberDoc(workspaceId) {
+      return firestore.get(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid));
     }
 
-    function isStaffSide() {
+    function isWorkspaceMember(workspaceId) {
       return signedIn()
-        && userDoc().data.active == true
-        && userDoc().data.role in ['admin', 'staff'];
+        && request.auth.token.email_verified == true
+        && memberDoc(workspaceId).exists
+        && memberDoc(workspaceId).data.status == 'ACTIVE';
     }
 
-    function isClient() {
+    function companyUserDoc(companyId) {
+      return firestore.get(/databases/(default)/documents/companies/$(companyId)/users/$(request.auth.uid));
+    }
+
+    function isStaffSide(companyId) {
       return signedIn()
-        && userDoc().data.active == true
-        && userDoc().data.role == 'client';
+        && companyUserDoc(companyId).data.active == true
+        && companyUserDoc(companyId).data.role in ['admin', 'staff'];
     }
 
-    function projectData(projectId) {
-      return firestore.get(/databases/(default)/documents/companies/siteledger/projects/$(projectId)).data;
+    function isClient(companyId) {
+      return signedIn()
+        && companyUserDoc(companyId).data.active == true
+        && companyUserDoc(companyId).data.role == 'client';
     }
 
-    function isClientOnProject(projectId) {
-      return isClient() && request.auth.uid in projectData(projectId).clientUserIds;
+    function projectData(companyId, projectId) {
+      return firestore.get(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)).data;
     }
 
-    match /companies/siteledger/projects/{projectId}/updates/{date}/{folder}/{fileName} {
-      allow read: if isStaffSide()
-        || (isClientOnProject(projectId) && folder in ['photos', 'videos', 'handover']);
-      allow write: if isStaffSide()
-        && request.resource.size < 200 * 1024 * 1024
+    function isClientOnProject(companyId, projectId) {
+      return isClient(companyId)
+        && request.auth.uid in projectData(companyId, projectId).clientUserIds;
+    }
+
+    function canWriteMedia() {
+      return request.resource.size < 200 * 1024 * 1024
         && (
           request.resource.contentType.matches('image/.*')
           || request.resource.contentType.matches('video/.*')
@@ -41,19 +50,57 @@ service firebase.storage {
         );
     }
 
-    match /companies/siteledger/projects/{projectId}/3d/{fileName} {
-      allow read: if isStaffSide() || isClientOnProject(projectId);
-      allow write: if isStaffSide()
+    // Legacy + tenant paths: companies/{workspaceId}/projects/...
+    match /companies/{companyId}/projects/{projectId}/updates/{date}/{folder}/{fileName} {
+      allow read: if isStaffSide(companyId)
+        || isWorkspaceMember(companyId)
+        || (isClientOnProject(companyId, projectId) && folder in ['photos', 'videos', 'handover']);
+      allow write: if (isStaffSide(companyId) || isWorkspaceMember(companyId))
+        && canWriteMedia();
+    }
+
+    match /companies/{companyId}/projects/{projectId}/3d/{fileName} {
+      allow read: if isStaffSide(companyId)
+        || isWorkspaceMember(companyId)
+        || isClientOnProject(companyId, projectId);
+      allow write: if (isStaffSide(companyId) || isWorkspaceMember(companyId))
         && request.resource.size < 50 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
-    match /companies/siteledger/projects/{projectId}/purchases/{purchaseId}/photos/{fileName} {
-      allow read: if isStaffSide() || isClientOnProject(projectId);
-      allow write: if (isStaffSide() || isClientOnProject(projectId))
+    match /companies/{companyId}/projects/{projectId}/purchases/{purchaseId}/photos/{fileName} {
+      allow read: if isStaffSide(companyId)
+        || isWorkspaceMember(companyId)
+        || isClientOnProject(companyId, projectId);
+      allow write: if (isStaffSide(companyId)
+          || isWorkspaceMember(companyId)
+          || isClientOnProject(companyId, projectId))
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
-      allow delete: if isStaffSide() || isClientOnProject(projectId);
+      allow delete: if isStaffSide(companyId)
+        || isWorkspaceMember(companyId)
+        || isClientOnProject(companyId, projectId);
+    }
+
+    // New workspace-scoped cover uploads
+    match /workspaces/{workspaceId}/projects/{projectId}/cover/{fileName} {
+      allow read: if isWorkspaceMember(workspaceId) || isStaffSide(workspaceId);
+      allow write: if (isWorkspaceMember(workspaceId) || isStaffSide(workspaceId))
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /workspaces/{workspaceId}/projects/{projectId}/journal/{fileName} {
+      allow read: if isWorkspaceMember(workspaceId) || isStaffSide(workspaceId);
+      allow write: if (isWorkspaceMember(workspaceId) || isStaffSide(workspaceId))
+        && canWriteMedia();
+    }
+
+    match /workspaces/{workspaceId}/projects/{projectId}/purchases/{purchaseId}/{fileName} {
+      allow read: if isWorkspaceMember(workspaceId) || isStaffSide(workspaceId);
+      allow write: if (isWorkspaceMember(workspaceId) || isStaffSide(workspaceId))
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
     }
   }
 }

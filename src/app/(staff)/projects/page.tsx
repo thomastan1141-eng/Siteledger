@@ -6,32 +6,42 @@ import {
   SiteButton,
   SiteInput,
   SitePageHeader,
+  SitePill,
   SiteSpinner,
 } from "@/components/progress/primitives";
 import { ForecastPill, ProjectStatusPill } from "@/components/progress/status";
 import { useAuth } from "@/lib/auth-context";
+import { useWorkspace } from "@/lib/workspace-context";
 import { listProjects } from "@/lib/services/projects";
 import type { Project } from "@/lib/types";
 import {
   formatDate,
-  getProjectDisplayName,
+  getProjectDisplayTitle,
   getProjectManagerName,
+  isProjectIncomplete,
   matchesProjectSearch,
 } from "@/lib/utils";
 
 export default function ProjectsPage() {
   const { profile } = useAuth();
+  const { workspaceId } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    listProjects(
-      profile?.role === "staff" ? { staffId: profile.uid } : undefined,
-    )
+    if (!workspaceId && profile?.role !== "admin" && profile?.role !== "staff") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- no tenant yet
+      setLoading(false);
+      return;
+    }
+    listProjects({
+      workspaceId: workspaceId || profile?.defaultWorkspaceId || undefined,
+      ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
+    })
       .then(setProjects)
       .finally(() => setLoading(false));
-  }, [profile]);
+  }, [profile, workspaceId]);
 
   if (loading) return <SiteSpinner />;
 
@@ -74,9 +84,9 @@ export default function ProjectsPage() {
             ) : null}
           </div>
           <div className="site-project-meta">
-            <h3>{getProjectDisplayName(project)}</h3>
+            <h3>{getProjectDisplayTitle(project)}</h3>
             <p>
-              {project.clientName}
+              {project.clientName || "No client yet"}
               {getProjectManagerName(project)
                 ? ` · ${getProjectManagerName(project)}`
                 : ""}
@@ -84,6 +94,7 @@ export default function ProjectsPage() {
           </div>
           <div className="site-project-side">
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {isProjectIncomplete(project) ? <SitePill>Draft</SitePill> : null}
               <ProjectStatusPill status={project.status} />
               <ForecastPill status={project.forecastStatus} />
             </div>
