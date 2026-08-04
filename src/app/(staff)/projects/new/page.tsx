@@ -67,8 +67,15 @@ export default function NewProjectPage() {
     setError("");
     setWarning("");
     try {
+      const tenant =
+        workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "";
+      if (!tenant) {
+        throw new Error(
+          "Workspace is not ready yet. Refresh the page and try again.",
+        );
+      }
       const { project, photoWarning } = await createProject({
-        workspaceId: workspaceId || profile?.defaultWorkspaceId || undefined,
+        workspaceId: tenant,
         createdBy: profile?.uid || null,
         updatedBy: profile?.uid || null,
         clientName: form.clientName,
@@ -103,7 +110,12 @@ export default function NewProjectPage() {
 
       if (stageInputs.length) {
         try {
-          await createManyStages(project.id, stageInputs, profile?.uid);
+          await createManyStages(
+            project.id,
+            stageInputs,
+            profile?.uid,
+            project.workspaceId || tenant,
+          );
         } catch (stageErr) {
           console.error("[createProject stages]", stageErr);
           setWarning(

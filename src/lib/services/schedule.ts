@@ -11,8 +11,7 @@ import {
 } from "firebase/firestore";
 import { getFirebaseDb } from "../firebase";
 import { AUTH_BYPASS, DEMO_SCHEDULE } from "../demo";
-import { COMPANY_ID } from "../constants";
-import { schedulePath } from "../paths";
+import { schedulePath, tenantId } from "../paths";
 import { normalizeStage, summarizeProjectStages } from "../utils";
 import type { ScheduleItem, ScheduleStatus } from "../types";
 
@@ -35,6 +34,7 @@ export type ScheduleInput = {
   internalNotes?: string;
   sortOrder?: number;
   createdBy?: string;
+  workspaceId?: string;
 };
 
 function mapStage(id: string, data: Record<string, unknown>): ScheduleItem {
@@ -44,10 +44,15 @@ function mapStage(id: string, data: Record<string, unknown>): ScheduleItem {
   });
 }
 
+function resolveWorkspace(workspaceId?: string | null) {
+  return tenantId(workspaceId);
+}
+
 export async function listSchedule(
   projectId: string,
-  options?: { clientOnly?: boolean },
+  options?: { clientOnly?: boolean; workspaceId?: string },
 ) {
+  const ws = resolveWorkspace(options?.workspaceId);
   let items: ScheduleItem[];
 
   if (AUTH_BYPASS) {
@@ -57,7 +62,7 @@ export async function listSchedule(
       .sort((a, b) => a.sortOrder - b.sortOrder);
   } else {
     const q = query(
-      collection(getFirebaseDb(), schedulePath(projectId)),
+      collection(getFirebaseDb(), schedulePath(projectId, ws)),
       orderBy("sortOrder", "asc"),
     );
     const snap = await getDocs(q);
@@ -76,11 +81,13 @@ export async function listSchedule(
 export async function createScheduleItem(
   projectId: string,
   input: ScheduleInput,
+  workspaceId?: string,
 ) {
+  const ws = resolveWorkspace(workspaceId || input.workspaceId);
   const now = new Date().toISOString();
   const data: Omit<ScheduleItem, "id"> = {
     projectId,
-    companyId: COMPANY_ID,
+    companyId: ws,
     name: input.name.trim(),
     normalizedName: input.name.trim().toLowerCase(),
     source: input.source || "custom",
@@ -106,7 +113,10 @@ export async function createScheduleItem(
     return item;
   }
 
-  const ref = await addDoc(collection(getFirebaseDb(), schedulePath(projectId)), data);
+  const ref = await addDoc(
+    collection(getFirebaseDb(), schedulePath(projectId, ws)),
+    data,
+  );
   return normalizeStage({ id: ref.id, ...data });
 }
 
@@ -121,8 +131,9 @@ export async function createManyStages(
     internalNotes?: string;
   }>,
   createdBy?: string,
+  workspaceId?: string,
 ) {
-  const existing = await listSchedule(projectId);
+  const existing = await listSchedule(projectId, { workspaceId });
   const created: ScheduleItem[] = [];
   let order = existing.length;
 
@@ -136,16 +147,21 @@ export async function createManyStages(
       continue;
     }
     created.push(
-      await createScheduleItem(projectId, {
-        name,
-        source: entry.source || "preset",
-        plannedStartDate: entry.plannedStartDate,
-        plannedEndDate: entry.plannedEndDate,
-        clientVisible: entry.clientVisible !== false,
-        internalNotes: entry.internalNotes,
-        sortOrder: order,
-        createdBy,
-      }),
+      await createScheduleItem(
+        projectId,
+        {
+          name,
+          source: entry.source || "preset",
+          plannedStartDate: entry.plannedStartDate,
+          plannedEndDate: entry.plannedEndDate,
+          clientVisible: entry.clientVisible !== false,
+          internalNotes: entry.internalNotes,
+          sortOrder: order,
+          createdBy,
+          workspaceId,
+        },
+        workspaceId,
+      ),
     );
     order += 1;
   }
@@ -157,11 +173,14 @@ export async function updateScheduleItem(
   projectId: string,
   itemId: string,
   patch: Partial<ScheduleInput> & { name?: string },
+  workspaceId?: string,
 ) {
+  const ws = resolveWorkspace(workspaceId || patch.workspaceId);
   const normalized: Record<string, unknown> = {
     ...patch,
     updatedAt: new Date().toISOString(),
   };
+  delete normalized.workspaceId;
   if (patch.name !== undefined) {
     normalized.name = patch.name.trim();
     normalized.normalizedName = patch.name.trim().toLowerCase();
@@ -181,13 +200,18 @@ export async function updateScheduleItem(
     );
     return;
   }
-  await updateDoc(doc(getFirebaseDb(), schedulePath(projectId), itemId), normalized);
+  await updateDoc(
+    doc(getFirebaseDb(), schedulePath(projectId, ws), itemId),
+    normalized,
+  );
 }
 
 export async function reorderStages(
   projectId: string,
   orderedIds: string[],
+  workspaceId?: string,
 ) {
+  const ws = resolveWorkspace(workspaceId);
   if (AUTH_BYPASS) {
     demoSchedule = demoSchedule.map((item) => {
       if (item.projectId !== projectId) return item;
@@ -200,7 +224,7 @@ export async function reorderStages(
 
   const batch = writeBatch(getFirebaseDb());
   orderedIds.forEach((id, index) => {
-    batch.update(doc(getFirebaseDb(), schedulePath(projectId), id), {
+    batch.update(doc(getFirebaseDb(), schedulePath(projectId, ws), id), {
       sortOrder: index,
       updatedAt: new Date().toISOString(),
     });
@@ -208,12 +232,17 @@ export async function reorderStages(
   await batch.commit();
 }
 
-export async function deleteScheduleItem(projectId: string, itemId: string) {
+export async function deleteScheduleItem(
+  projectId: string,
+  itemId: string,
+  workspaceId?: string,
+) {
+  const ws = resolveWorkspace(workspaceId);
   if (AUTH_BYPASS) {
     demoSchedule = demoSchedule.filter((item) => item.id !== itemId);
     return;
   }
-  await deleteDoc(doc(getFirebaseDb(), schedulePath(projectId), itemId));
+  await deleteDoc(doc(getFirebaseDb(), schedulePath(projectId, ws), itemId));
 }
 
 export function summarizeSchedule(items: ScheduleItem[]) {

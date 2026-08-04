@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthShell } from "@/components/auth-shell";
@@ -24,6 +24,7 @@ export default function VerifyEmailPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const finishingRef = useRef(false);
 
   useEffect(() => {
     if (AUTH_BYPASS) {
@@ -51,9 +52,67 @@ export default function VerifyEmailPage() {
     router,
   ]);
 
+  useEffect(() => {
+    if (AUTH_BYPASS || loading || !user) return;
+
+    let cancelled = false;
+
+    async function finishIfVerified() {
+      if (cancelled || finishingRef.current) return;
+      try {
+        const verified = await reloadVerified();
+        if (!verified || cancelled) return;
+
+        finishingRef.current = true;
+        setBusy(true);
+        setError("");
+        setMessage("Email verified. Setting up your workspace…");
+        await completeOnboarding();
+        if (!cancelled) router.replace("/dashboard");
+      } catch (err) {
+        finishingRef.current = false;
+        if (cancelled) return;
+        setError(
+          err instanceof Error
+            ? err.message
+            : "We could not finish setup. Please try again.",
+        );
+        setBusy(false);
+      }
+    }
+
+    void finishIfVerified();
+
+    const intervalId = window.setInterval(() => {
+      void finishIfVerified();
+    }, 2500);
+
+    function onFocus() {
+      void finishIfVerified();
+    }
+    function onVisibility() {
+      if (document.visibilityState === "visible") {
+        void finishIfVerified();
+      }
+    }
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+    // Intentionally keyed to uid so polling is not reset on every auth refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable wait loop
+  }, [loading, user?.uid]);
+
   if (loading || !user) return <SiteSpinner label="Loading…" />;
 
   async function onVerified() {
+    if (finishingRef.current) return;
     setBusy(true);
     setError("");
     setMessage("");
@@ -65,10 +124,12 @@ export default function VerifyEmailPage() {
         );
         return;
       }
+      finishingRef.current = true;
       setMessage("Email verified. Setting up your workspace…");
       await completeOnboarding();
       router.replace("/dashboard");
     } catch (err) {
+      finishingRef.current = false;
       setError(
         err instanceof Error
           ? err.message
@@ -82,7 +143,7 @@ export default function VerifyEmailPage() {
   return (
     <AuthShell
       title="Check your inbox"
-      description="We sent a verification link to your email address."
+      description="We sent a verification link to your email address. After you verify, this page will continue automatically."
     >
       <div style={{ display: "grid", gap: 12 }}>
         <p style={{ fontSize: 14, color: "var(--site-text-secondary)" }}>

@@ -9,6 +9,7 @@ import {
 } from "@/components/progress/primitives";
 import { ProgressMediaGrid } from "@/components/progress/media-grid";
 import { useAuth } from "@/lib/auth-context";
+import { useWorkspace } from "@/lib/workspace-context";
 import { listProjects } from "@/lib/services/projects";
 import { listMedia } from "@/lib/services/media";
 import type { MediaItem, Project } from "@/lib/types";
@@ -16,6 +17,7 @@ import { getProjectDisplayName } from "@/lib/utils";
 
 export default function MediaLibraryPage() {
   const { profile } = useAuth();
+  const { workspaceId } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [media, setMedia] = useState<MediaItem[]>([]);
@@ -23,14 +25,20 @@ export default function MediaLibraryPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    listProjects(
-      profile?.role === "staff" ? { staffId: profile.uid } : undefined,
-    ).then((data) => {
+    const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId;
+    if (!ws) {
+      setLoading(false);
+      return;
+    }
+    listProjects({
+      workspaceId: ws,
+      ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
+    }).then((data) => {
       setProjects(data);
       if (data[0]) setProjectId(data[0].id);
       setLoading(false);
     });
-  }, [profile]);
+  }, [profile, workspaceId]);
 
   useEffect(() => {
     if (!projectId) return;

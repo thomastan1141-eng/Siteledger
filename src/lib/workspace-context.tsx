@@ -86,15 +86,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             displayName: currentProfile.displayName,
             studioName: currentProfile.studioName || undefined,
           });
-          await refreshProfile();
+          const refreshed = await refreshProfile();
           const nextId =
+            refreshed?.defaultWorkspaceId ||
+            refreshed?.companyId ||
             currentProfile.defaultWorkspaceId ||
-            currentProfile.companyId ||
-            COMPANY_ID;
-          [ws, member] = await Promise.all([
-            getWorkspace(nextId),
-            getWorkspaceMember(nextId, currentProfile.uid),
-          ]);
+            currentProfile.companyId;
+          if (nextId) {
+            [ws, member] = await Promise.all([
+              getWorkspace(nextId),
+              getWorkspaceMember(nextId, currentProfile.uid),
+            ]);
+          }
         } catch (err) {
           console.warn("[workspace migrate]", err);
         }

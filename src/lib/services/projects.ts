@@ -15,7 +15,7 @@ import {
   uploadBytesResumable,
   type UploadTaskSnapshot,
 } from "firebase/storage";
-import { getFirebaseDb, getFirebaseStorage } from "../firebase";
+import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_PROJECTS } from "../demo";
 import {
@@ -121,12 +121,24 @@ function resolveTenant(workspaceId?: string | null) {
   return tenantId(workspaceId);
 }
 
+function requireWorkspaceId(workspaceId?: string | null) {
+  const ws = workspaceId?.trim();
+  if (!ws) {
+    throw new Error(
+      "Workspace is not ready yet. Refresh the page and try again.",
+    );
+  }
+  return ws;
+}
+
 export async function listProjects(options?: {
   status?: ProjectStatus;
   staffId?: string;
   workspaceId?: string;
 }) {
-  const ws = resolveTenant(options?.workspaceId);
+  const ws = options?.workspaceId?.trim()
+    ? options.workspaceId.trim()
+    : resolveTenant(options?.workspaceId);
 
   if (AUTH_BYPASS) {
     let projects = [...demoProjects]
@@ -250,7 +262,7 @@ export type CreateProjectResult = {
 export async function createProject(
   input: ProjectInput & { coverFile?: File | null },
 ): Promise<CreateProjectResult> {
-  const workspaceId = resolveTenant(input.workspaceId);
+  const workspaceId = requireWorkspaceId(input.workspaceId);
   const address = optionalString(input.address);
   const clientName = optionalString(input.clientName);
   const manager = optionalString(input.manager || input.managerName);
@@ -272,7 +284,14 @@ export async function createProject(
   }
 
   const status = input.status || "upcoming";
-  const createdBy = optionalString(input.createdBy);
+  const authUid =
+    !AUTH_BYPASS && getFirebaseAuth().currentUser?.uid
+      ? getFirebaseAuth().currentUser!.uid
+      : optionalString(input.createdBy);
+  if (!authUid) {
+    throw new Error("Please sign in again before creating a project.");
+  }
+  const createdBy = authUid;
   const now = new Date().toISOString();
 
   if (AUTH_BYPASS) {

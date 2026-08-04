@@ -78,6 +78,14 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function verificationActionCodeSettings() {
+  if (typeof window === "undefined") return undefined;
+  return {
+    url: `${window.location.origin}/verify-email`,
+    handleCodeInApp: false,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<AppUser | null>(
@@ -211,7 +219,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               displayName: input.displayName.trim(),
             });
           }
-          await sendEmailVerification(cred.user);
+          await sendEmailVerification(
+            cred.user,
+            verificationActionCodeSettings(),
+          );
           if (typeof window !== "undefined") {
             window.sessionStorage.setItem(
               "siteledger.pendingSignup",
@@ -269,24 +280,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async resendVerification() {
         const current = getFirebaseAuth().currentUser;
         if (!current) throw new Error("Please sign in again.");
-        await sendEmailVerification(current);
+        await sendEmailVerification(
+          current,
+          verificationActionCodeSettings(),
+        );
       },
       async reloadVerified() {
         const current = getFirebaseAuth().currentUser;
         if (!current) return false;
         await current.reload();
-        const verified = Boolean(getFirebaseAuth().currentUser?.emailVerified);
-        setUser(getFirebaseAuth().currentUser);
+        // Force token refresh so email_verified claim updates for API routes.
+        await current.getIdToken(true);
+        const latest = getFirebaseAuth().currentUser;
+        const verified = Boolean(latest?.emailVerified);
+        setUser((prev) => {
+          if (
+            prev?.uid === latest?.uid &&
+            prev?.emailVerified === latest?.emailVerified
+          ) {
+            return prev;
+          }
+          return latest;
+        });
         return verified;
       },
       async completeOnboarding(input) {
         const current = getFirebaseAuth().currentUser;
         if (!current) throw new Error("Please sign in again.");
         await current.reload();
-        if (!current.emailVerified) {
+        await current.getIdToken(true);
+        const latest = getFirebaseAuth().currentUser;
+        if (!latest?.emailVerified) {
           throw new Error("Please verify your email before continuing.");
         }
-        const token = await current.getIdToken(true);
+        const token = await latest.getIdToken(true);
         let pending: { studioName?: string; displayName?: string } = {};
         if (typeof window !== "undefined") {
           try {
@@ -305,7 +332,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (typeof window !== "undefined") {
           window.sessionStorage.removeItem("siteledger.pendingSignup");
         }
-        await loadProfile(current);
+        setUser(latest);
+        await loadProfile(latest);
         return result.workspaceId || "";
       },
       async refreshProfile() {

@@ -6,21 +6,28 @@ import {
   SiteSpinner,
 } from "@/components/progress/primitives";
 import { useAuth } from "@/lib/auth-context";
+import { useWorkspace } from "@/lib/workspace-context";
 import { listProjects } from "@/lib/services/projects";
 import type { Project } from "@/lib/types";
 import { formatBytes, getProjectDisplayName } from "@/lib/utils";
 
 export default function StoragePage() {
   const { profile } = useAuth();
+  const { workspaceId } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    listProjects().then((data) => {
+    const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId;
+    if (!ws) {
+      setLoading(false);
+      return;
+    }
+    listProjects({ workspaceId: ws }).then((data) => {
       setProjects(data);
       setLoading(false);
     });
-  }, []);
+  }, [workspaceId, profile]);
 
   const totals = useMemo(() => {
     return projects.reduce(
