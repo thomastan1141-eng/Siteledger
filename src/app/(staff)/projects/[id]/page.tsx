@@ -11,7 +11,7 @@ import {
   SiteSpinner,
   SiteTextarea,
 } from "@/components/progress/primitives";
-import { BunnyVideoUploader } from "@/components/media/bunny-video-uploader";
+import { SimpleMediaUploader } from "@/components/media/simple-media-uploader";
 import { ProgressMediaGrid } from "@/components/progress/media-grid";
 import { ProgressTimeline } from "@/components/progress/timeline";
 import { JournalComposer } from "@/components/progress/journal-composer";
@@ -28,8 +28,13 @@ import {
 } from "@/components/progress/project-chrome";
 import { WeekTimeline } from "@/components/progress/week-timeline";
 import { ScheduleStatusPill } from "@/components/progress/status";
+import {
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+} from "firebase/auth";
 import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace-context";
+import { getFirebaseAuth } from "@/lib/firebase";
 import {
   getProject,
   markProjectCompleted,
@@ -75,6 +80,11 @@ export default function ProjectDetailsPage() {
       : "overview",
   );
   const [manageStagesOpen, setManageStagesOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [edit, setEdit] = useState({
     clientName: "",
     manager: "",
@@ -388,6 +398,10 @@ export default function ProjectDetailsPage() {
               allowDownload
               workspaceId={project.workspaceId || project.companyId}
               canDelete={profile?.role === "admin"}
+              canManageVisibility={
+                profile?.role === "admin" ||
+                (profile?.role === "staff" && project.allowStaffPublish)
+              }
               onChanged={() => void reload()}
             />
           </SiteSection>
@@ -421,7 +435,7 @@ export default function ProjectDetailsPage() {
       {tab === "media" ? (
         <div style={{ display: "grid", gap: 16 }}>
           {profile?.role !== "client" ? (
-            <BunnyVideoUploader
+            <SimpleMediaUploader
               projectId={project.id}
               workspaceId={project.workspaceId || project.companyId}
               onUploaded={() => void reload()}
@@ -432,6 +446,10 @@ export default function ProjectDetailsPage() {
             allowDownload
             workspaceId={project.workspaceId || project.companyId}
             canDelete={profile?.role === "admin"}
+            canManageVisibility={
+              profile?.role === "admin" ||
+              (profile?.role === "staff" && project.allowStaffPublish)
+            }
             onChanged={() => void reload()}
           />
         </div>
@@ -603,8 +621,139 @@ export default function ProjectDetailsPage() {
                 Mark completed
               </SiteButton>
             ) : null}
+            {project.createdBy === profile?.uid ? (
+              <SiteButton
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setDeleteOpen(true);
+                  setDeleteConfirm("");
+                  setDeletePassword("");
+                  setDeleteError("");
+                }}
+              >
+                Delete project
+              </SiteButton>
+            ) : null}
           </div>
         </form>
+      ) : null}
+
+      {deleteOpen ? (
+        <div className="site-sheet-backdrop">
+          <div
+            className="site-sheet"
+            style={{ maxWidth: 480, padding: 20 }}
+            role="dialog"
+            aria-modal="true"
+          >
+            <h3 className="site-section-title">Delete project</h3>
+            <p className="site-section-desc">
+              The project will move to Recently Deleted for 30 days. Clients and
+              colleagues lose access immediately. You can restore it within 30
+              days. After that it is permanently removed.
+            </p>
+            <SiteField
+              label={
+                getProjectDisplayTitle(project).trim()
+                  ? `Type “${getProjectDisplayTitle(project)}” to confirm`
+                  : 'Type “DELETE PROJECT” to confirm'
+              }
+            >
+              <SiteInput
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                autoComplete="off"
+              />
+            </SiteField>
+            <SiteField label="Current password">
+              <SiteInput
+                type="password"
+                autoComplete="current-password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+              />
+            </SiteField>
+            {deleteError ? (
+              <p style={{ color: "var(--site-danger)" }}>{deleteError}</p>
+            ) : null}
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <SiteButton
+                type="button"
+                variant="accent"
+                disabled={deleteBusy}
+                onClick={async () => {
+                  const expected =
+                    getProjectDisplayTitle(project).trim() || "DELETE PROJECT";
+                  if (deleteConfirm.trim() !== expected) {
+                    setDeleteError(
+                      expected === "DELETE PROJECT"
+                        ? 'Type "DELETE PROJECT" exactly.'
+                        : "Type the exact project address.",
+                    );
+                    return;
+                  }
+                  setDeleteBusy(true);
+                  setDeleteError("");
+                  try {
+                    const auth = getFirebaseAuth();
+                    const current = auth.currentUser;
+                    if (!current?.email) {
+                      throw new Error("Please sign in again.");
+                    }
+                    await reauthenticateWithCredential(
+                      current,
+                      EmailAuthProvider.credential(
+                        current.email,
+                        deletePassword,
+                      ),
+                    );
+                    const token = await current.getIdToken(true);
+                    const ws =
+                      project.workspaceId ||
+                      workspaceId ||
+                      profile?.defaultWorkspaceId ||
+                      "";
+                    const res = await fetch(
+                      `/api/projects/${project.id}/trash`,
+                      {
+                        method: "POST",
+                        headers: {
+                          Authorization: `Bearer ${token}`,
+                          "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                          workspaceId: ws,
+                          confirmTitle: deleteConfirm.trim(),
+                        }),
+                      },
+                    );
+                    const data = (await res.json()) as { error?: string };
+                    if (!res.ok) {
+                      throw new Error(data.error || "Delete failed.");
+                    }
+                    router.push("/projects/trash");
+                  } catch (err) {
+                    setDeleteError(
+                      err instanceof Error ? err.message : "Delete failed.",
+                    );
+                  } finally {
+                    setDeleteBusy(false);
+                  }
+                }}
+              >
+                {deleteBusy ? "Deleting…" : "Move to Recently Deleted"}
+              </SiteButton>
+              <SiteButton
+                type="button"
+                variant="ghost"
+                onClick={() => setDeleteOpen(false)}
+              >
+                Cancel
+              </SiteButton>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

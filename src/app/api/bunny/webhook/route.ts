@@ -15,59 +15,168 @@ import type { BunnyVideoStatus } from "@/lib/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Public Bunny Stream webhook.
+ * Must NOT require Firebase Auth, cookies, CSRF, or project membership.
+ * Security: HMAC signature with BUNNY_STREAM_READ_ONLY_API_KEY.
+ */
 export async function POST(request: Request) {
+  const signatureVersion = request.headers.get(
+    "X-BunnyStream-Signature-Version",
+  );
+  const signatureAlgorithm = request.headers.get(
+    "X-BunnyStream-Signature-Algorithm",
+  );
+  const signature = request.headers.get("X-BunnyStream-Signature");
+
+  let rawBody = "";
   try {
-    const rawBody = await request.text();
-    const version = request.headers.get("X-BunnyStream-Signature-Version");
-    const algorithm = request.headers.get("X-BunnyStream-Signature-Algorithm");
-    const signature = request.headers.get("X-BunnyStream-Signature");
+    rawBody = await request.text();
+  } catch {
+    console.info(
+      JSON.stringify({
+        webhookReceived: true,
+        signaturePresent: Boolean(signature),
+        httpResult: 400,
+        reason: "body_read_failed",
+      }),
+    );
+    return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  }
 
-    const valid = verifyBunnyWebhookSignature({
-      rawBody,
-      version,
-      algorithm,
-      signature,
-    });
-    if (!valid) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const valid = verifyBunnyWebhookSignature({
+    rawBody,
+    version: signatureVersion,
+    algorithm: signatureAlgorithm,
+    signature,
+  });
 
-    const payload = JSON.parse(rawBody) as {
-      VideoLibraryId?: number | string;
-      VideoGuid?: string;
-      Status?: number;
-    };
+  if (!valid) {
+    console.info(
+      JSON.stringify({
+        webhookReceived: true,
+        signatureVersion,
+        signatureAlgorithm,
+        signaturePresent: Boolean(signature),
+        httpResult: 401,
+        reason: "invalid_signature",
+      }),
+    );
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-    const libraryId = String(payload.VideoLibraryId || "");
-    if (libraryId !== bunnyConfig.libraryId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  let payload: {
+    VideoLibraryId?: number | string;
+    VideoGuid?: string;
+    Status?: number;
+  };
+  try {
+    payload = JSON.parse(rawBody) as typeof payload;
+  } catch {
+    console.info(
+      JSON.stringify({
+        webhookReceived: true,
+        signaturePresent: true,
+        httpResult: 400,
+        reason: "invalid_json",
+      }),
+    );
+    return NextResponse.json({ error: "Malformed payload" }, { status: 400 });
+  }
 
-    const videoGuid = String(payload.VideoGuid || "").trim();
-    const statusCode = Number(payload.Status);
-    if (!videoGuid || !Number.isFinite(statusCode)) {
-      return NextResponse.json({ ok: true });
-    }
+  const libraryId = Number(payload.VideoLibraryId);
+  const expectedLibrary = Number(bunnyConfig.libraryId);
+  if (!Number.isFinite(libraryId) || libraryId !== expectedLibrary) {
+    console.info(
+      JSON.stringify({
+        webhookReceived: true,
+        signaturePresent: true,
+        libraryId: payload.VideoLibraryId ?? null,
+        httpResult: 401,
+        reason: "library_mismatch",
+      }),
+    );
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
+  const videoGuid = String(payload.VideoGuid || "").trim();
+  const statusCode = Number(payload.Status);
+  if (!videoGuid || !Number.isFinite(statusCode)) {
+    console.info(
+      JSON.stringify({
+        webhookReceived: true,
+        libraryId,
+        videoGuid: videoGuid || null,
+        bunnyStatus: payload.Status ?? null,
+        httpResult: 400,
+        reason: "missing_fields",
+      }),
+    );
+    return NextResponse.json({ error: "Malformed payload" }, { status: 400 });
+  }
+
+  try {
     const media = await findMediaByBunnyVideoId(videoGuid);
     if (!media) {
-      return NextResponse.json({ ok: true });
+      console.info(
+        JSON.stringify({
+          webhookReceived: true,
+          libraryId,
+          videoGuid,
+          bunnyStatus: statusCode,
+          mediaRecordFound: false,
+          httpResult: 200,
+        }),
+      );
+      // Valid signed webhook for unknown video — acknowledge to stop retries.
+      return NextResponse.json({ ok: true, mediaRecordFound: false });
     }
 
     const current = String(media.data.status || "") as BunnyVideoStatus;
     const mapped = mapBunnyWebhookStatus(statusCode, current);
     if (!mapped) {
+      console.info(
+        JSON.stringify({
+          webhookReceived: true,
+          libraryId,
+          videoGuid,
+          bunnyStatus: statusCode,
+          mediaRecordFound: true,
+          resultingStatus: current,
+          httpResult: 200,
+          reason: "no_status_change",
+        }),
+      );
       return NextResponse.json({ ok: true });
     }
 
-    // Preserve READY against lower-priority updates.
-    if (current === "READY" && mapped !== "READY" && mapped !== "FAILED") {
+    // Never downgrade READY/PLAYABLE except to FAILED.
+    if (
+      (current === "READY" || current === "PLAYABLE") &&
+      mapped !== "READY" &&
+      mapped !== "PLAYABLE" &&
+      mapped !== "FAILED"
+    ) {
+      console.info(
+        JSON.stringify({
+          webhookReceived: true,
+          libraryId,
+          videoGuid,
+          bunnyStatus: statusCode,
+          mediaRecordFound: true,
+          resultingStatus: current,
+          httpResult: 200,
+          reason: "preserve_ready",
+        }),
+      );
       return NextResponse.json({ ok: true });
     }
+
     if (current === mapped && mapped !== "READY" && mapped !== "PLAYABLE") {
       return NextResponse.json({ ok: true });
     }
 
+    let resulting = mapped;
     if (mapped === "READY" || mapped === "PLAYABLE" || mapped === "FAILED") {
       try {
         const details = await getBunnyVideo(videoGuid);
@@ -77,6 +186,18 @@ export async function POST(request: Request) {
             media.projectId,
             media.id,
             bunnyDetailsToPatch(details, mapped),
+          );
+          resulting = mapped;
+          console.info(
+            JSON.stringify({
+              webhookReceived: true,
+              libraryId,
+              videoGuid,
+              bunnyStatus: statusCode,
+              mediaRecordFound: true,
+              resultingStatus: resulting,
+              httpResult: 200,
+            }),
           );
           return NextResponse.json({ ok: true });
         }
@@ -95,9 +216,24 @@ export async function POST(request: Request) {
         : {}),
     });
 
+    console.info(
+      JSON.stringify({
+        webhookReceived: true,
+        libraryId,
+        videoGuid,
+        bunnyStatus: statusCode,
+        mediaRecordFound: true,
+        resultingStatus: resulting,
+        httpResult: 200,
+      }),
+    );
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[bunny/webhook]", err instanceof Error ? err.message : "error");
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    console.error(
+      "[bunny/webhook] processing_failed",
+      err instanceof Error ? err.message : "error",
+    );
+    // 500 so Bunny retries; never 403.
+    return NextResponse.json({ error: "Processing failed" }, { status: 500 });
   }
 }

@@ -34,6 +34,7 @@ export async function createBunnyUploadSession(input: {
   title?: string;
   description?: string;
   clientVisible?: boolean;
+  capturedAt?: string;
 }) {
   const res = await fetch("/api/bunny/videos/create-upload", {
     method: "POST",
@@ -44,6 +45,7 @@ export async function createBunnyUploadSession(input: {
       title: input.title || input.file.name,
       description: input.description,
       clientVisible: Boolean(input.clientVisible),
+      capturedAt: input.capturedAt,
       fileName: input.file.name,
       fileType: input.file.type || "video/mp4",
       fileSize: input.file.size,
@@ -299,6 +301,7 @@ export async function uploadVideoFileViaBunny(input: {
   file: File;
   title?: string;
   clientVisible?: boolean;
+  capturedAt?: string;
   onProgress?: (pct: number, status: BunnyUploadProgress["status"]) => void;
 }): Promise<string> {
   const clientUploadId = crypto.randomUUID();
@@ -310,6 +313,7 @@ export async function uploadVideoFileViaBunny(input: {
     clientUploadId,
     title: input.title || input.file.name,
     clientVisible: input.clientVisible,
+    capturedAt: input.capturedAt,
   });
 
   const { promise } = startBunnyTusUpload({

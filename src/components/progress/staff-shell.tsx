@@ -8,6 +8,7 @@ import {
   HardDrive,
   LayoutGrid,
   LogOut,
+  Trash2,
   UserRound,
   Users,
 } from "lucide-react";
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/media", label: "Media", icon: Camera },
   { href: "/access", label: "Access", icon: Users },
+  { href: "/projects/trash", label: "Deleted", icon: Trash2 },
   { href: "/storage", label: "Storage", icon: HardDrive },
   { href: "/account", label: "Account", icon: UserRound },
 ];

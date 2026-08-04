@@ -2,28 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  CheckCircle2,
-  Film,
-  Images,
-  LayoutGrid,
-  LogOut,
-  Route,
-  ShoppingBag,
-  UserRound,
-} from "lucide-react";
+import { Film, Images, LogOut, UserRound } from "lucide-react";
 import { PLATFORM_KICKER, PLATFORM_NAME } from "@/lib/constants";
 import { useAuth } from "@/lib/auth-context";
 import { AUTH_BYPASS } from "@/lib/demo";
 import { SiteButton } from "./primitives";
 
+/** Client portal: media + account only. No Schedule/Journal/Purchases/Access. */
 const NAV = [
-  { href: "/client", label: "Overview", icon: LayoutGrid },
-  { href: "/client/timeline", label: "Journal", icon: Route },
-  { href: "/client/gallery", label: "Photos", icon: Images },
+  { href: "/client/gallery", label: "Project Media", icon: Images },
   { href: "/client/videos", label: "Videos", icon: Film },
-  { href: "/client/completed", label: "Stages", icon: CheckCircle2 },
-  { href: "/client/purchases", label: "Purchases", icon: ShoppingBag },
   { href: "/client/account", label: "Account", icon: UserRound },
 ];
 

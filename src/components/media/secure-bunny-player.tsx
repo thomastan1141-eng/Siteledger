@@ -62,9 +62,9 @@ export function SecureBunnyPlayer({
         {item.status === "FAILED"
           ? "Video processing failed"
           : item.status === "PROCESSING" || item.status === "UPLOADING"
-            ? `Processing video…${
-                item.encodeProgress != null ? ` ${item.encodeProgress}%` : ""
-              }`
+            ? typeof item.encodeProgress === "number" && item.encodeProgress > 0
+              ? `Processing video… ${Math.min(99, Math.round(item.encodeProgress))}%`
+              : "Processing video…"
             : "Video not ready"}
       </div>
     );

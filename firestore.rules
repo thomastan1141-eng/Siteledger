@@ -172,26 +172,53 @@ service cloud.firestore {
         allow read, write: if canAccessTenant(companyId);
       }
 
+      match /createRequests/{requestId} {
+        allow read, write: if false; // Admin SDK only
+      }
+
+      match /auditEvents/{eventId} {
+        allow read: if isTenantAdmin(companyId);
+        allow write: if false; // Admin SDK only
+      }
+
       match /projects/{projectId} {
-        // Tenant admins / active workspace members can list & open all projects.
-        // Assigned staff/clients keep narrower access via company user mirror.
-        allow read: if isTenantAdmin(companyId)
-          || isWorkspaceMember(companyId)
-          || (hasCompanyUser(companyId)
-              && companyProfile(companyId).role == 'staff'
-              && (
-                request.auth.uid in resource.data.staffIds
-                || resource.data.managerId == request.auth.uid
-              ))
-          || (isCompanyClient(companyId)
-              && request.auth.uid in resource.data.clientUserIds);
+        function projectNotTrashed() {
+          return !('status' in resource.data)
+            || !(resource.data.status in ['trashed', 'purging']);
+        }
+
+        function isProjectCreator() {
+          return signedIn()
+            && 'createdBy' in resource.data
+            && resource.data.createdBy == request.auth.uid;
+        }
+
+        // Trashed projects: creator recovery only. Active projects: tenant/staff/client.
+        allow read: if (
+            projectNotTrashed()
+            && (
+              isTenantAdmin(companyId)
+              || isWorkspaceMember(companyId)
+              || (hasCompanyUser(companyId)
+                  && companyProfile(companyId).role == 'staff'
+                  && (
+                    request.auth.uid in resource.data.staffIds
+                    || resource.data.managerId == request.auth.uid
+                  ))
+              || (isCompanyClient(companyId)
+                  && request.auth.uid in resource.data.clientUserIds)
+            )
+          )
+          || (isProjectCreator()
+              && resource.data.status in ['trashed', 'purging']);
 
         allow create: if isTenantAdmin(companyId)
           && request.resource.data.workspaceId == companyId
           && request.resource.data.companyId == companyId
           && request.resource.data.createdBy == request.auth.uid;
 
-        allow update: if (isTenantAdmin(companyId)
+        allow update: if projectNotTrashed()
+          && (isTenantAdmin(companyId)
             || (hasCompanyUser(companyId)
                 && companyProfile(companyId).role == 'staff'
                 && (
@@ -209,14 +236,22 @@ service cloud.firestore {
             !('createdBy' in resource.data)
             || resource.data.createdBy == null
             || request.resource.data.createdBy == resource.data.createdBy
-          );
+          )
+          && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['deletedAt', 'purgeAt', 'deletedBy', 'clientRequestId']);
 
-        allow delete: if isTenantAdmin(companyId);
+        // Soft/hard delete via Admin SDK only.
+        allow delete: if false;
 
         match /members/{memberId} {
           allow read: if isTenantAdmin(companyId)
             || (signedIn() && request.auth.uid == memberId);
           allow write: if false; // Admin SDK only
+        }
+
+        match /invitations/{invitationId} {
+          allow read: if isTenantAdmin(companyId);
+          allow write: if false; // Admin SDK only — never expose tokenHash writes
         }
 
         match /schedule/{itemId} {

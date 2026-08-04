@@ -32,7 +32,59 @@ export type ProjectStatus =
   | "in_progress"
   | "on_hold"
   | "completed"
-  | "archived";
+  | "archived"
+  | "trashed"
+  | "purging";
+
+export type InviteType = "CLIENT" | "COLLEAGUE";
+
+export type ColleaguePreset =
+  | "VIEW_ONLY"
+  | "UPDATE_PROGRESS"
+  | "EDITOR"
+  | "CUSTOM";
+
+export type InvitationStatus =
+  | "PENDING"
+  | "ACCEPTED"
+  | "DECLINED"
+  | "EXPIRED"
+  | "REVOKED";
+
+export type ProjectMemberType =
+  | "OWNER"
+  | "CLIENT"
+  | "COLLEAGUE"
+  | "COMPANY_MEMBER";
+
+export type ProjectMemberLifecycle =
+  | "ACTIVE"
+  | "SUSPENDED"
+  | "REMOVED";
+
+export type ColleaguePermissions = {
+  viewProject: boolean;
+  viewSchedule: boolean;
+  updateSchedule: boolean;
+  viewJournal: boolean;
+  addJournal: boolean;
+  editOwnJournal: boolean;
+  editAllJournal: boolean;
+  deleteOwnJournal: boolean;
+  deleteAllJournal: boolean;
+  viewMedia: boolean;
+  downloadMedia: boolean;
+  uploadMedia: boolean;
+  editOwnMedia: boolean;
+  editAllMedia: boolean;
+  deleteOwnMedia: boolean;
+  deleteAllMedia: boolean;
+  publishMediaToClient: boolean;
+  viewPurchases: boolean;
+  editPurchases: boolean;
+  editProjectDetails: boolean;
+  manageProjectAccess: boolean;
+};
 
 export type ScheduleStatus =
   | "not_started"
@@ -74,21 +126,57 @@ export interface AppUser {
   active: boolean;
 }
 
-export type ProjectAccessRole = "CLIENT" | "STAFF";
-export type ProjectAccessStatus = "ACTIVE" | "REVOKED";
+export type ProjectAccessRole = "CLIENT" | "STAFF" | "COLLEAGUE";
+export type ProjectAccessStatus =
+  | "ACTIVE"
+  | "REVOKED"
+  | "SUSPENDED"
+  | "REMOVED";
 
 export interface ProjectMember {
   uid: string;
   workspaceId: string;
   projectId: string;
-  displayName: string;
+  displayName: string | null;
   email: string;
+  /** Legacy role field — prefer memberType. */
   role: ProjectAccessRole;
+  memberType?: ProjectMemberType;
+  permissionPreset?:
+    | "OWNER"
+    | "CLIENT"
+    | ColleaguePreset;
+  permissions?: ColleaguePermissions | null;
   status: ProjectAccessStatus;
-  mustChangePassword: boolean;
+  mustChangePassword?: boolean;
+  invitedBy?: string;
+  invitedAt?: string;
+  acceptedAt?: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProjectInvitation {
+  id: string;
+  projectId: string;
+  workspaceId: string;
+  inviteType: InviteType;
+  email: string;
+  normalizedEmail: string;
+  displayName: string | null;
+  colleaguePreset: ColleaguePreset | null;
+  permissions: ColleaguePermissions | null;
+  status: InvitationStatus;
+  tokenHash: string;
+  invitedBy: string;
+  invitedAt: string;
+  expiresAt: string;
+  acceptedBy: string | null;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  /** Present only in API responses for the inviter — never stored. */
+  inviteUrl?: string;
 }
 
 export interface Workspace {
@@ -175,6 +263,12 @@ export interface Project {
   storageBytes: number;
   lastUpdateAt?: string;
   lastClientUpdateAt?: string;
+  /** Soft-delete fields */
+  deletedAt?: string | null;
+  purgeAt?: string | null;
+  deletedBy?: string | null;
+  /** Status before trash, restored on undelete */
+  statusBeforeTrash?: ProjectStatus | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -302,14 +396,18 @@ export interface MediaItem {
   caption?: string;
   title?: string | null;
   description?: string | null;
-  /** Prefer this for Bunny videos; kept in sync with visibility for clients. */
+  /** Prefer this for Bunny videos; kept in sync with visibility for clients. Always boolean on new writes. */
   clientVisible?: boolean;
   visibility: MediaVisibility;
   uploadedBy: string;
   uploadedByName: string;
+  /** User-selected media date/time (ISO). Authoritative for grouping. */
+  capturedAt?: string;
+  /** Legacy day key (yyyy-MM-dd); derived from capturedAt for older UI. */
   date: string;
   createdAt: string;
   updatedAt?: string;
+  updatedBy?: string | null;
   readyAt?: string | null;
   deletedAt?: string | null;
   /** Bunny Stream fields — server-controlled. */
@@ -344,6 +442,8 @@ export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   on_hold: "On Hold",
   completed: "Completed",
   archived: "Archived",
+  trashed: "Recently deleted",
+  purging: "Deleting permanently",
 };
 
 export const FORECAST_STATUS_LABELS: Record<ForecastStatus, string> = {

@@ -68,6 +68,7 @@ export async function createBunnyMediaRecord(input: {
   uploadedBy: string;
   uploadedByName: string;
   clientUploadId: string;
+  capturedAt?: string | null;
   date: string;
 }) {
   const db = getAdminDb();
@@ -110,6 +111,7 @@ export async function createBunnyMediaRecord(input: {
     uploadedBy: input.uploadedBy,
     uploadedByName: input.uploadedByName,
     clientUploadId: input.clientUploadId,
+    capturedAt: input.capturedAt || null,
     date: input.date,
     createdAt: now,
     updatedAt: now,

@@ -27,6 +27,7 @@ type Body = {
   title?: string;
   description?: string;
   clientVisible?: boolean;
+  capturedAt?: string;
   fileName?: string;
   fileType?: string;
   fileSize?: number;
@@ -46,6 +47,7 @@ export async function POST(request: Request) {
     const title = (body.title || fileName || "Untitled video").trim();
     const description = (body.description || "").trim() || null;
     const clientVisible = Boolean(body.clientVisible);
+    const capturedAt = (body.capturedAt || "").trim() || null;
 
     if (!projectId) {
       return NextResponse.json({ error: "Project is required." }, { status: 400 });
@@ -132,7 +134,8 @@ export async function POST(request: Request) {
         uploadedBy: user.uid,
         uploadedByName,
         clientUploadId,
-        date: todayKey(),
+        capturedAt,
+        date: capturedAt ? capturedAt.slice(0, 10) : todayKey(),
       });
 
       const tus = createTusCredentials(bunnyVideoId);

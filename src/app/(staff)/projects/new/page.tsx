@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   SiteButton,
@@ -13,8 +13,8 @@ import {
 import { COMMON_STAGE_OPTIONS } from "@/lib/constants";
 import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace-context";
-import { createProject } from "@/lib/services/projects";
 import { createManyStages } from "@/lib/services/schedule";
+import { getFirebaseAuth } from "@/lib/firebase";
 import type { ProjectStatus } from "@/lib/types";
 
 type CustomDraft = {
@@ -25,6 +25,18 @@ type CustomDraft = {
   internalNotes: string;
 };
 
+type FormState = {
+  clientName: string;
+  manager: string;
+  address: string;
+  startDate: string;
+  contractCompletionDate: string;
+  forecastCompletionDate: string;
+  status: ProjectStatus;
+  internalNotes: string;
+  allowStaffPublish: boolean;
+};
+
 const emptyCustom = (): CustomDraft => ({
   name: "",
   plannedStartDate: "",
@@ -33,27 +45,46 @@ const emptyCustom = (): CustomDraft => ({
   internalNotes: "",
 });
 
+const emptyForm = (): FormState => ({
+  clientName: "",
+  manager: "",
+  address: "",
+  startDate: "",
+  contractCompletionDate: "",
+  forecastCompletionDate: "",
+  status: "upcoming",
+  internalNotes: "",
+  allowStaffPublish: false,
+});
+
 export default function NewProjectPage() {
   const { profile } = useAuth();
   const { workspaceId } = useWorkspace();
   const router = useRouter();
+  const formKey = useId();
+  const submittingRef = useRef(false);
+  const [formInstance, setFormInstance] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
   const [customs, setCustoms] = useState<CustomDraft[]>([]);
   const [customDraft, setCustomDraft] = useState<CustomDraft>(emptyCustom());
-  const [form, setForm] = useState({
-    clientName: "",
-    manager: "",
-    address: "",
-    startDate: "",
-    contractCompletionDate: "",
-    forecastCompletionDate: "",
-    status: "upcoming" as ProjectStatus,
-    internalNotes: "",
-    allowStaffPublish: false,
-  });
+  const [form, setForm] = useState<FormState>(emptyForm);
+
+  // Always remount as a fresh form — never restore drafts.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fresh mount reset
+    setForm(emptyForm());
+    setSelectedPresets([]);
+    setCustoms([]);
+    setCustomDraft(emptyCustom());
+    setError("");
+    setWarning("");
+    setBusy(false);
+    submittingRef.current = false;
+    setFormInstance((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     if (profile?.role !== "admin") {
@@ -61,11 +92,29 @@ export default function NewProjectPage() {
     }
   }, [profile, router]);
 
+  function resetAll() {
+    setForm(emptyForm());
+    setSelectedPresets([]);
+    setCustoms([]);
+    setCustomDraft(emptyCustom());
+    setError("");
+    setWarning("");
+    setFormInstance((n) => n + 1);
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (busy || submittingRef.current) return;
+    submittingRef.current = true;
     setBusy(true);
     setError("");
     setWarning("");
+
+    const clientRequestId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
     try {
       const tenant =
         workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "";
@@ -74,23 +123,40 @@ export default function NewProjectPage() {
           "Workspace is not ready yet. Refresh the page and try again.",
         );
       }
-      const { project, photoWarning } = await createProject({
-        workspaceId: tenant,
-        createdBy: profile?.uid || null,
-        updatedBy: profile?.uid || null,
-        clientName: form.clientName,
-        manager: form.manager,
-        address: form.address,
-        startDate: form.startDate || null,
-        contractCompletionDate: form.contractCompletionDate || null,
-        forecastCompletionDate: form.forecastCompletionDate || null,
-        status: form.status || "upcoming",
-        internalNotes: form.internalNotes,
-        allowStaffPublish: form.allowStaffPublish,
+
+      const auth = getFirebaseAuth();
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Please sign in again.");
+
+      const res = await fetch("/api/projects/create", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clientRequestId,
+          workspaceId: tenant,
+          clientName: form.clientName,
+          manager: form.manager,
+          address: form.address,
+          startDate: form.startDate || null,
+          contractCompletionDate: form.contractCompletionDate || null,
+          forecastCompletionDate: form.forecastCompletionDate || null,
+          status: form.status || "upcoming",
+          internalNotes: form.internalNotes,
+          allowStaffPublish: form.allowStaffPublish,
+        }),
       });
+      const data = (await res.json()) as {
+        error?: string;
+        project?: { id: string; workspaceId?: string };
+      };
+      if (!res.ok || !data.project?.id) {
+        throw new Error(data.error || "We could not create the project.");
+      }
 
-      if (photoWarning) setWarning(photoWarning);
-
+      const project = data.project;
       const stageInputs = [
         ...selectedPresets.map((name) => ({
           name,
@@ -118,26 +184,24 @@ export default function NewProjectPage() {
           );
         } catch (stageErr) {
           console.error("[createProject stages]", stageErr);
-          setWarning(
-            (photoWarning ? `${photoWarning} ` : "") +
-              "Stages could not be saved. You can add them later.",
-          );
+          setWarning("Stages could not be saved. You can add them later.");
         }
       }
 
+      resetAll();
       router.push(`/projects/${project.id}`);
     } catch (err) {
+      submittingRef.current = false;
+      setBusy(false);
       setError(
         err instanceof Error
           ? err.message
           : "We could not create the project. Please try again.",
       );
-    } finally {
-      setBusy(false);
     }
   }
 
-  function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
+  function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -160,6 +224,8 @@ export default function NewProjectPage() {
       />
 
       <form
+        key={`${formKey}-${formInstance}`}
+        autoComplete="off"
         onSubmit={onSubmit}
         style={{
           maxWidth: 720,
@@ -170,6 +236,8 @@ export default function NewProjectPage() {
       >
         <SiteField label="Client name">
           <SiteInput
+            name="projectClientName"
+            autoComplete="off"
             value={form.clientName}
             onChange={(e) => set("clientName", e.target.value)}
             placeholder="Optional"
@@ -177,6 +245,8 @@ export default function NewProjectPage() {
         </SiteField>
         <SiteField label="Manager">
           <SiteInput
+            name="projectManager"
+            autoComplete="off"
             value={form.manager}
             onChange={(e) => set("manager", e.target.value)}
             placeholder="Enter manager name"
@@ -185,6 +255,11 @@ export default function NewProjectPage() {
         <div style={{ gridColumn: "1 / -1" }}>
           <SiteField label="Address">
             <SiteInput
+              name="projectAddress"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               value={form.address}
               onChange={(e) => set("address", e.target.value)}
               placeholder="e.g. 19 Burnfoot Terrace"
@@ -194,6 +269,8 @@ export default function NewProjectPage() {
         <SiteField label="Start date">
           <SiteInput
             type="date"
+            name="projectStartDate"
+            autoComplete="off"
             value={form.startDate}
             onChange={(e) => set("startDate", e.target.value)}
           />
@@ -201,6 +278,8 @@ export default function NewProjectPage() {
         <SiteField label="Contract completion">
           <SiteInput
             type="date"
+            name="projectContractCompletion"
+            autoComplete="off"
             value={form.contractCompletionDate}
             onChange={(e) => set("contractCompletionDate", e.target.value)}
           />
@@ -208,12 +287,16 @@ export default function NewProjectPage() {
         <SiteField label="Current forecast">
           <SiteInput
             type="date"
+            name="projectForecastCompletion"
+            autoComplete="off"
             value={form.forecastCompletionDate}
             onChange={(e) => set("forecastCompletionDate", e.target.value)}
           />
         </SiteField>
         <SiteField label="Status">
           <SiteSelect
+            name="projectStatus"
+            autoComplete="off"
             value={form.status}
             onChange={(e) => set("status", e.target.value as ProjectStatus)}
           >
@@ -225,6 +308,8 @@ export default function NewProjectPage() {
         <div style={{ gridColumn: "1 / -1" }}>
           <SiteField label="Internal notes">
             <SiteTextarea
+              name="projectInternalNotes"
+              autoComplete="off"
               rows={3}
               value={form.internalNotes}
               onChange={(e) => set("internalNotes", e.target.value)}
@@ -286,6 +371,8 @@ export default function NewProjectPage() {
           <div className="site-stage-composer" style={{ marginBottom: 0, maxWidth: "none" }}>
             <SiteField label="Stage name">
               <SiteInput
+                name="customStageName"
+                autoComplete="off"
                 value={customDraft.name}
                 onChange={(e) =>
                   setCustomDraft((s) => ({ ...s, name: e.target.value }))
@@ -297,6 +384,7 @@ export default function NewProjectPage() {
               <SiteField label="Expected start (optional)">
                 <SiteInput
                   type="date"
+                  autoComplete="off"
                   value={customDraft.plannedStartDate}
                   onChange={(e) =>
                     setCustomDraft((s) => ({
@@ -309,6 +397,7 @@ export default function NewProjectPage() {
               <SiteField label="Expected end (optional)">
                 <SiteInput
                   type="date"
+                  autoComplete="off"
                   value={customDraft.plannedEndDate}
                   onChange={(e) =>
                     setCustomDraft((s) => ({
@@ -335,6 +424,7 @@ export default function NewProjectPage() {
             <SiteField label="Internal note (optional)">
               <SiteTextarea
                 rows={2}
+                autoComplete="off"
                 value={customDraft.internalNotes}
                 onChange={(e) =>
                   setCustomDraft((s) => ({
@@ -370,14 +460,6 @@ export default function NewProjectPage() {
               ))}
             </ul>
           ) : null}
-
-          <p className="site-section-desc" style={{ marginTop: 12 }}>
-            Selected: {selectedPresets.length} common
-            {customs.length ? ` · ${customs.length} custom` : ""}
-            {!selectedPresets.length && !customs.length
-              ? " · none (you can add stages later)"
-              : ""}
-          </p>
         </div>
 
         {error ? (

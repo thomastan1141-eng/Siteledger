@@ -14,7 +14,7 @@ import {
   uploadBytesResumable,
   type UploadTaskSnapshot,
 } from "firebase/storage";
-import { getFirebaseDb, getFirebaseStorage } from "../firebase";
+import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_MEDIA } from "../demo";
 import { mediaPath, storageMediaPath } from "../paths";
@@ -93,6 +93,48 @@ export async function uploadMediaFile(
     fileName: file.name,
     type: (isVideoFile(file) ? "video" : "photo") as MediaType,
   };
+}
+
+/**
+ * Uploads a photo to Firebase Storage and creates its media record in one call,
+ * carrying the user-selected capturedAt (date + time) and clientVisible flag.
+ */
+export async function uploadPhotoMedia(
+  projectId: string,
+  file: File,
+  options: {
+    capturedAt: string;
+    clientVisible: boolean;
+    workspaceId?: string;
+    uploadedBy: string;
+    uploadedByName: string;
+    date?: string;
+    onProgress?: (pct: number) => void;
+  },
+) {
+  const date = options.date || options.capturedAt.slice(0, 10) || todayKey();
+  const visibility: MediaVisibility = options.clientVisible
+    ? "client_visible"
+    : "internal";
+
+  const uploaded = await uploadMediaFile(projectId, file, {
+    date,
+    visibility,
+    workspaceId: options.workspaceId,
+    onProgress: options.onProgress,
+  });
+
+  return createMediaRecord(projectId, {
+    ...uploaded,
+    workspaceId: options.workspaceId,
+    visibility,
+    clientVisible: options.clientVisible,
+    capturedAt: options.capturedAt,
+    date,
+    workItems: [],
+    uploadedBy: options.uploadedBy,
+    uploadedByName: options.uploadedByName,
+  });
 }
 
 export async function createMediaRecord(
@@ -201,6 +243,43 @@ export async function updateMediaCaption(
     caption,
     updatedAt: new Date().toISOString(),
   });
+}
+
+/**
+ * Toggle client visibility for a single media item (photo or Bunny video)
+ * through the server route so permissions and audit logging apply.
+ */
+export async function setMediaClientVisible(input: {
+  mediaId: string;
+  projectId: string;
+  workspaceId?: string;
+  clientVisible: boolean;
+}) {
+  const user = getFirebaseAuth().currentUser;
+  if (!user) throw new Error("Please sign in again.");
+  const token = await user.getIdToken();
+  const res = await fetch(
+    `/api/media/${encodeURIComponent(input.mediaId)}/visibility`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        projectId: input.projectId,
+        workspaceId: input.workspaceId,
+        clientVisible: input.clientVisible,
+      }),
+    },
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      data.error || "Could not update visibility. Please try again.",
+    );
+  }
+  return data as { clientVisible: boolean; visibility: MediaVisibility };
 }
 
 export function detectMediaKind(file: File): MediaType | null {

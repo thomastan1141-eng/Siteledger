@@ -143,6 +143,7 @@ export async function listProjects(options?: {
   if (AUTH_BYPASS) {
     let projects = [...demoProjects]
       .filter((p) => (p.workspaceId || COMPANY_ID) === ws)
+      .filter((p) => p.status !== "trashed" && p.status !== "purging")
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     if (options?.status) {
       projects = projects.filter((p) => p.status === options.status);
@@ -169,6 +170,7 @@ export async function listProjects(options?: {
     let projects = snap.docs
       .map((d) => mapProject(d.id, d.data()))
       .filter((p) => (p.workspaceId || p.companyId || COMPANY_ID) === ws)
+      .filter((p) => p.status !== "trashed" && p.status !== "purging")
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     if (options?.status) {
       projects = projects.filter((p) => p.status === options.status);
@@ -185,7 +187,9 @@ export async function listProjects(options?: {
 
   try {
     const snap = await getDocs(q);
-    let projects = snap.docs.map((d) => mapProject(d.id, d.data()));
+    let projects = snap.docs
+      .map((d) => mapProject(d.id, d.data()))
+      .filter((p) => p.status !== "trashed" && p.status !== "purging");
     if (options?.status) {
       projects = projects.filter((p) => p.status === options.status);
     }
@@ -200,12 +204,32 @@ export async function listProjects(options?: {
         (p) =>
           (p.workspaceId || p.companyId || COMPANY_ID) === ws ||
           !p.workspaceId,
-      );
+      )
+      .filter((p) => p.status !== "trashed" && p.status !== "purging");
     if (options?.status) {
       projects = projects.filter((p) => p.status === options.status);
     }
     return projects;
   }
+}
+
+/** Creator-only: list soft-deleted projects. */
+export async function listTrashedProjects(workspaceId?: string) {
+  const ws = resolveTenant(workspaceId);
+  if (AUTH_BYPASS) {
+    return demoProjects.filter(
+      (p) =>
+        (p.workspaceId || COMPANY_ID) === ws && p.status === "trashed",
+    );
+  }
+  const col = collection(getFirebaseDb(), projectsPath(ws));
+  const q = query(col, where("status", "==", "trashed"));
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => mapProject(d.id, d.data()))
+    .sort((a, b) =>
+      String(b.deletedAt || "").localeCompare(String(a.deletedAt || "")),
+    );
 }
 
 export async function listClientProjects(

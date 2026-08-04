@@ -11,9 +11,13 @@ service firebase.storage {
 
     function isWorkspaceMember(workspaceId) {
       return signedIn()
-        && request.auth.token.email_verified == true
         && memberDoc(workspaceId).exists
         && memberDoc(workspaceId).data.status == 'ACTIVE';
+    }
+
+    function projectNotTrashed(companyId, projectId) {
+      return !('status' in projectData(companyId, projectId))
+        || !(projectData(companyId, projectId).status in ['trashed', 'purging']);
     }
 
     function companyUserDoc(companyId) {
@@ -41,22 +45,26 @@ service firebase.storage {
         && request.auth.uid in projectData(companyId, projectId).clientUserIds;
     }
 
-    function canWriteMedia() {
+    function canWritePhoto() {
       return request.resource.size < 200 * 1024 * 1024
         && (
           request.resource.contentType.matches('image/.*')
-          || request.resource.contentType.matches('video/.*')
           || request.resource.contentType == 'application/pdf'
         );
     }
 
     // Legacy + tenant paths: companies/{workspaceId}/projects/...
+    // Videos must use Bunny Stream — do not accept new video/* uploads here.
     match /companies/{companyId}/projects/{projectId}/updates/{date}/{folder}/{fileName} {
-      allow read: if isStaffSide(companyId)
-        || isWorkspaceMember(companyId)
-        || (isClientOnProject(companyId, projectId) && folder in ['photos', 'videos', 'handover']);
-      allow write: if (isStaffSide(companyId) || isWorkspaceMember(companyId))
-        && canWriteMedia();
+      allow read: if projectNotTrashed(companyId, projectId)
+        && (
+          isStaffSide(companyId)
+          || isWorkspaceMember(companyId)
+          || (isClientOnProject(companyId, projectId) && folder in ['photos', 'handover'])
+        );
+      allow write: if projectNotTrashed(companyId, projectId)
+        && (isStaffSide(companyId) || isWorkspaceMember(companyId))
+        && canWritePhoto();
     }
 
     match /companies/{companyId}/projects/{projectId}/3d/{fileName} {
