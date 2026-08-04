@@ -51,7 +51,7 @@ function toMediaVisibility(visibility: Visibility): MediaVisibility {
 
 export async function listUpdates(
   projectId: string,
-  options?: { clientOnly?: boolean },
+  options?: { clientOnly?: boolean; workspaceId?: string },
 ) {
   if (AUTH_BYPASS) {
     let updates = demoUpdates.filter((u) => u.projectId === projectId);
@@ -64,8 +64,9 @@ export async function listUpdates(
     });
   }
 
+  const workspaceId = options?.workspaceId?.trim() || COMPANY_ID;
   const q = query(
-    collection(getFirebaseDb(), updatesPath(projectId)),
+    collection(getFirebaseDb(), updatesPath(projectId, workspaceId)),
     orderBy("createdAt", "desc"),
   );
   const snap = await getDocs(q);

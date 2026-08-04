@@ -29,6 +29,7 @@ import {
 import { WeekTimeline } from "@/components/progress/week-timeline";
 import { ScheduleStatusPill } from "@/components/progress/status";
 import { useAuth } from "@/lib/auth-context";
+import { useWorkspace } from "@/lib/workspace-context";
 import {
   getProject,
   markProjectCompleted,
@@ -58,6 +59,7 @@ export default function ProjectDetailsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { profile } = useAuth();
+  const { workspaceId } = useWorkspace();
   const [project, setProject] = useState<Project | null>(null);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [updates, setUpdates] = useState<DailyUpdate[]>([]);
@@ -87,39 +89,50 @@ export default function ProjectDetailsPage() {
   });
 
   async function reload() {
-    const p = await getProject(id);
-    const ws = p?.workspaceId || p?.companyId;
-    const [s, u, m] = await Promise.all([
-      listSchedule(id, { workspaceId: ws }),
-      listUpdates(id),
-      listMedia(id, { workspaceId: ws }),
-    ]);
-    setProject(p);
-    setSchedule(s);
-    setUpdates(u);
-    setMedia(m);
-    if (p) {
-      setEdit({
-        clientName: p.clientName || "",
-        manager: getProjectManagerName(p),
-        address: p.address || "",
-        forecastCompletionDate: p.forecastCompletionDate || "",
-        contractCompletionDate: p.contractCompletionDate || "",
-        status: p.status,
-        forecastStatus: p.forecastStatus,
-        internalNotes: p.internalNotes || "",
-        allowStaffPublish: p.allowStaffPublish,
-        allowClientDownload: p.allowClientDownload,
-      });
+    const tenant =
+      workspaceId || profile?.defaultWorkspaceId || profile?.companyId || undefined;
+    try {
+      const p = await getProject(id, tenant);
+      const ws = p?.workspaceId || p?.companyId || tenant;
+      const [s, u, m] = await Promise.all([
+        listSchedule(id, { workspaceId: ws }),
+        listUpdates(id, { workspaceId: ws }),
+        listMedia(id, { workspaceId: ws }),
+      ]);
+      setProject(p);
+      setSchedule(s);
+      setUpdates(u);
+      setMedia(m);
+      if (p) {
+        setEdit({
+          clientName: p.clientName || "",
+          manager: getProjectManagerName(p),
+          address: p.address || "",
+          forecastCompletionDate: p.forecastCompletionDate || "",
+          contractCompletionDate: p.contractCompletionDate || "",
+          status: p.status,
+          forecastStatus: p.forecastStatus,
+          internalNotes: p.internalNotes || "",
+          allowStaffPublish: p.allowStaffPublish,
+          allowClientDownload: p.allowClientDownload,
+        });
+      }
+    } catch (err) {
+      console.error("[project reload]", err);
+      setProject(null);
+      setSchedule([]);
+      setUpdates([]);
+      setMedia([]);
     }
   }
 
   useEffect(() => {
     // Data load for project shell — async setState in .then/.finally
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on id change
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on id/workspace change
+    setLoading(true);
     reload().finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, workspaceId]);
 
   const summary = useMemo(() => summarizeSchedule(schedule), [schedule]);
   const mediaByUpdate = useMemo(() => {
@@ -138,12 +151,16 @@ export default function ProjectDetailsPage() {
     setSaving(true);
     try {
       setProject(
-        await updateProject(project.id, {
-          ...edit,
-          clientName: edit.clientName.trim(),
-          manager: edit.manager.trim(),
-          address: edit.address.trim(),
-        }),
+        await updateProject(
+          project.id,
+          {
+            ...edit,
+            clientName: edit.clientName.trim(),
+            manager: edit.manager.trim(),
+            address: edit.address.trim(),
+          },
+          project.workspaceId || workspaceId || undefined,
+        ),
       );
     } finally {
       setSaving(false);
@@ -230,7 +247,11 @@ export default function ProjectDetailsPage() {
                 onChange={async (e) => {
                   const startDate = e.target.value;
                   setProject(
-                    await updateProject(project.id, { startDate }),
+                    await updateProject(
+                      project.id,
+                      { startDate },
+                      project.workspaceId || workspaceId || undefined,
+                    ),
                   );
                 }}
               />
@@ -242,12 +263,16 @@ export default function ProjectDetailsPage() {
                 onChange={async (e) => {
                   const contractCompletionDate = e.target.value;
                   setProject(
-                    await updateProject(project.id, {
-                      contractCompletionDate,
-                      forecastCompletionDate:
-                        project.forecastCompletionDate ||
+                    await updateProject(
+                      project.id,
+                      {
                         contractCompletionDate,
-                    }),
+                        forecastCompletionDate:
+                          project.forecastCompletionDate ||
+                          contractCompletionDate,
+                      },
+                      project.workspaceId || workspaceId || undefined,
+                    ),
                   );
                 }}
               />
@@ -413,6 +438,7 @@ export default function ProjectDetailsPage() {
 
       <ManageStagesDialog
         projectId={project.id}
+        workspaceId={project.workspaceId || workspaceId || undefined}
         open={manageStagesOpen}
         onClose={() => setManageStagesOpen(false)}
         onChanged={setSchedule}
@@ -565,7 +591,12 @@ export default function ProjectDetailsPage() {
                 type="button"
                 variant="ghost"
                 onClick={async () => {
-                  setProject(await markProjectCompleted(project.id));
+                  setProject(
+                    await markProjectCompleted(
+                      project.id,
+                      project.workspaceId || workspaceId || undefined,
+                    ),
+                  );
                 }}
               >
                 Mark completed

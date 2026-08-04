@@ -11,6 +11,8 @@ import {
   SiteSpinner,
 } from "@/components/progress/primitives";
 import { WeekTimeline } from "@/components/progress/week-timeline";
+import { useAuth } from "@/lib/auth-context";
+import { useWorkspace } from "@/lib/workspace-context";
 import { getProject } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
 import type { Project, ScheduleItem } from "@/lib/types";
@@ -21,19 +23,26 @@ import { getProjectDisplayName } from "@/lib/utils";
  */
 export default function SchedulePage() {
   const { id } = useParams<{ id: string }>();
+  const { profile } = useAuth();
+  const { workspaceId } = useWorkspace();
   const [project, setProject] = useState<Project | null>(null);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [manageOpen, setManageOpen] = useState(false);
 
   useEffect(() => {
-    Promise.all([getProject(id), listSchedule(id)])
+    const tenant =
+      workspaceId || profile?.defaultWorkspaceId || profile?.companyId || undefined;
+    Promise.all([
+      getProject(id, tenant),
+      listSchedule(id, { workspaceId: tenant }),
+    ])
       .then(([p, s]) => {
         setProject(p);
         setSchedule(s);
       })
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, workspaceId, profile?.defaultWorkspaceId, profile?.companyId]);
 
   if (loading) return <SiteSpinner />;
   if (!project) {
@@ -83,6 +92,7 @@ export default function SchedulePage() {
 
       <ManageStagesDialog
         projectId={project.id}
+        workspaceId={project.workspaceId || workspaceId || undefined}
         open={manageOpen}
         onClose={() => setManageOpen(false)}
         onChanged={setSchedule}

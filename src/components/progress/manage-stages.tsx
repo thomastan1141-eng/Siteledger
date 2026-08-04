@@ -23,11 +23,13 @@ import { ScheduleStatusPill } from "./status";
 
 export function ManageStagesDialog({
   projectId,
+  workspaceId,
   open,
   onClose,
   onChanged,
 }: {
   projectId: string;
+  workspaceId?: string;
   open: boolean;
   onClose: () => void;
   onChanged?: (stages: ScheduleItem[]) => void;
@@ -46,17 +48,19 @@ export function ManageStagesDialog({
   const [dragId, setDragId] = useState<string | null>(null);
 
   async function reload() {
-    const next = await listSchedule(projectId);
+    const next = await listSchedule(projectId, { workspaceId });
     setStages(next);
     onChanged?.(next);
   }
 
   useEffect(() => {
     if (!open) return;
-    reload();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load stages when dialog opens
+    void reload();
     setSelectedPresets([]);
     setError("");
-  }, [open, projectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload closes over latest project/workspace
+  }, [open, projectId, workspaceId]);
 
   const availablePresets = useMemo(
     () =>
@@ -76,6 +80,8 @@ export function ManageStagesDialog({
       await createManyStages(
         projectId,
         selectedPresets.map((name) => ({ name, source: "preset" as const })),
+        undefined,
+        workspaceId,
       );
       setSelectedPresets([]);
       await reload();
@@ -95,15 +101,20 @@ export function ManageStagesDialog({
     setBusy(true);
     setError("");
     try {
-      await createScheduleItem(projectId, {
-        name: customName,
-        source: "custom",
-        plannedStartDate: customStart || undefined,
-        plannedEndDate: customEnd || undefined,
-        clientVisible: customVisible,
-        internalNotes: customNote || undefined,
-        sortOrder: stages.length,
-      });
+      await createScheduleItem(
+        projectId,
+        {
+          name: customName,
+          source: "custom",
+          plannedStartDate: customStart || undefined,
+          plannedEndDate: customEnd || undefined,
+          clientVisible: customVisible,
+          internalNotes: customNote || undefined,
+          sortOrder: stages.length,
+          workspaceId,
+        },
+        workspaceId,
+      );
       setCustomName("");
       setCustomStart("");
       setCustomEnd("");
@@ -122,8 +133,9 @@ export function ManageStagesDialog({
     await reorderStages(
       projectId,
       next.map((s) => s.id),
+      workspaceId,
     );
-    onChanged?.(await listSchedule(projectId));
+    onChanged?.(await listSchedule(projectId, { workspaceId }));
   }
 
   async function move(id: string, direction: -1 | 1) {
@@ -310,7 +322,7 @@ export function ManageStagesDialog({
                         if (status === "completed") {
                           patch.actualEndDate = new Date().toISOString().slice(0, 10);
                         }
-                        await updateScheduleItem(projectId, stage.id, patch);
+                        await updateScheduleItem(projectId, stage.id, patch, workspaceId);
                         await reload();
                       }}
                     >
@@ -327,7 +339,7 @@ export function ManageStagesDialog({
                         onChange={async (e) => {
                           await updateScheduleItem(projectId, stage.id, {
                             clientVisible: e.target.checked,
-                          });
+                          }, workspaceId);
                           await reload();
                         }}
                       />
@@ -340,7 +352,7 @@ export function ManageStagesDialog({
                         onClick={async () => {
                           await updateScheduleItem(projectId, stage.id, {
                             name: editName,
-                          });
+                          }, workspaceId);
                           setEditingId(null);
                           await reload();
                         }}
@@ -363,7 +375,7 @@ export function ManageStagesDialog({
                       type="button"
                       className="site-chip"
                       onClick={async () => {
-                        await deleteScheduleItem(projectId, stage.id);
+                        await deleteScheduleItem(projectId, stage.id, workspaceId);
                         await reload();
                       }}
                     >
@@ -379,7 +391,7 @@ export function ManageStagesDialog({
                         onChange={async (e) => {
                           await updateScheduleItem(projectId, stage.id, {
                             plannedStartDate: e.target.value,
-                          });
+                          }, workspaceId);
                           await reload();
                         }}
                       />
@@ -391,7 +403,7 @@ export function ManageStagesDialog({
                         onChange={async (e) => {
                           await updateScheduleItem(projectId, stage.id, {
                             plannedEndDate: e.target.value,
-                          });
+                          }, workspaceId);
                           await reload();
                         }}
                       />
@@ -403,7 +415,7 @@ export function ManageStagesDialog({
                         onChange={async (e) => {
                           await updateScheduleItem(projectId, stage.id, {
                             actualStartDate: e.target.value,
-                          });
+                          }, workspaceId);
                           await reload();
                         }}
                       />
@@ -415,7 +427,7 @@ export function ManageStagesDialog({
                         onChange={async (e) => {
                           await updateScheduleItem(projectId, stage.id, {
                             actualEndDate: e.target.value,
-                          });
+                          }, workspaceId);
                           await reload();
                         }}
                       />

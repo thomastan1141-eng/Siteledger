@@ -12,6 +12,7 @@ import {
 import { getFirebaseDb } from "../firebase";
 import { AUTH_BYPASS, DEMO_SCHEDULE } from "../demo";
 import { schedulePath, tenantId } from "../paths";
+import { sanitizeForFirestore } from "../sanitize";
 import { normalizeStage, summarizeProjectStages } from "../utils";
 import type { ScheduleItem, ScheduleStatus } from "../types";
 
@@ -85,27 +86,27 @@ export async function createScheduleItem(
 ) {
   const ws = resolveWorkspace(workspaceId || input.workspaceId);
   const now = new Date().toISOString();
-  const data: Omit<ScheduleItem, "id"> = {
+  const data = sanitizeForFirestore({
     projectId,
     companyId: ws,
     name: input.name.trim(),
     normalizedName: input.name.trim().toLowerCase(),
     source: input.source || "custom",
-    categoryId: input.categoryId,
-    plannedStartDate: input.plannedStartDate,
-    plannedEndDate: input.plannedEndDate,
-    actualStartDate: input.actualStartDate,
-    actualEndDate: input.actualEndDate,
-    reminderDate: input.reminderDate,
+    categoryId: input.categoryId ?? null,
+    plannedStartDate: input.plannedStartDate ?? null,
+    plannedEndDate: input.plannedEndDate ?? null,
+    actualStartDate: input.actualStartDate ?? null,
+    actualEndDate: input.actualEndDate ?? null,
+    reminderDate: input.reminderDate ?? null,
     status: input.status || "not_started",
-    barColor: input.barColor,
+    barColor: input.barColor ?? null,
     clientVisible: input.clientVisible !== false,
-    internalNotes: input.internalNotes,
+    internalNotes: input.internalNotes ?? null,
     sortOrder: input.sortOrder ?? 0,
-    createdBy: input.createdBy,
+    createdBy: input.createdBy ?? null,
     createdAt: now,
     updatedAt: now,
-  };
+  }) as Omit<ScheduleItem, "id">;
 
   if (AUTH_BYPASS) {
     const item = normalizeStage({ id: `demo-s-${Date.now()}`, ...data });
@@ -192,17 +193,19 @@ export async function updateScheduleItem(
     normalized.clientVisible = patch.clientVisible;
   }
 
+  const payload = sanitizeForFirestore(normalized);
+
   if (AUTH_BYPASS) {
     demoSchedule = demoSchedule.map((item) =>
       item.id === itemId
-        ? normalizeStage({ ...item, ...normalized } as ScheduleItem)
+        ? normalizeStage({ ...item, ...payload } as ScheduleItem)
         : item,
     );
     return;
   }
   await updateDoc(
     doc(getFirebaseDb(), schedulePath(projectId, ws), itemId),
-    normalized,
+    payload,
   );
 }
 
