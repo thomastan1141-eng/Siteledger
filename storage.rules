@@ -101,7 +101,7 @@ service firebase.storage {
     match /workspaces/{workspaceId}/projects/{projectId}/journal/{fileName} {
       allow read: if isWorkspaceMember(workspaceId) || isStaffSide(workspaceId);
       allow write: if (isWorkspaceMember(workspaceId) || isStaffSide(workspaceId))
-        && canWriteMedia();
+        && canWritePhoto();
     }
 
     match /workspaces/{workspaceId}/projects/{projectId}/purchases/{purchaseId}/{fileName} {
