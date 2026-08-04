@@ -19,7 +19,7 @@ import {
 import { useClientProject } from "@/lib/client-project";
 import { listClientVisiblePlans } from "@/lib/services/daily-plans";
 import type { DailyPlan } from "@/lib/types";
-import { formatDate, formatDateTime, singaporeDateKey } from "@/lib/utils";
+import { formatDate, formatDateTime, getProjectDisplayName, singaporeDateKey } from "@/lib/utils";
 
 export default function ClientOverviewPage() {
   const { project, summary, clientMedia } = useClientProject();
@@ -39,7 +39,7 @@ export default function ClientOverviewPage() {
     <div>
       <SitePageHeader
         kicker="Project overview"
-        title={project.name}
+        title={getProjectDisplayName(project)}
         description={project.address}
       />
 
@@ -49,7 +49,7 @@ export default function ClientOverviewPage() {
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={getOverviewDisplayImage(project)}
-              alt={project.name}
+              alt={getProjectDisplayName(project)}
             />
           ) : null}
           <div className="site-hero-visual-copy">

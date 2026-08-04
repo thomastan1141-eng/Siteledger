@@ -8,7 +8,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { listProjects } from "@/lib/services/projects";
 import type { Project } from "@/lib/types";
-import { formatBytes } from "@/lib/utils";
+import { formatBytes, getProjectDisplayName } from "@/lib/utils";
 
 export default function StoragePage() {
   const { profile } = useAuth();
@@ -79,7 +79,7 @@ export default function StoragePage() {
         >
           <div className="site-project-thumb" />
           <div className="site-project-meta">
-            <h3>{project.name}</h3>
+            <h3>{getProjectDisplayName(project)}</h3>
             <p>
               {project.photoCount} photos · {project.videoCount} videos
             </p>

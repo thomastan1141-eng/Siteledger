@@ -16,6 +16,45 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Primary project title — address first, then legacy name. */
+export function getProjectDisplayName(
+  project?: Pick<Project, "address" | "name"> | null,
+) {
+  const address = (project?.address || "").trim();
+  if (address) return address;
+  const legacy = (project?.name || "").trim();
+  if (legacy) return legacy;
+  return "Untitled project";
+}
+
+export function getProjectManagerName(
+  project?: Pick<Project, "manager" | "managerName"> | null,
+) {
+  return (project?.manager || project?.managerName || "").trim();
+}
+
+/** Search match: address, client name, manager (not project code). */
+export function matchesProjectSearch(
+  project: Pick<
+    Project,
+    "address" | "clientName" | "manager" | "managerName"
+  >,
+  query: string,
+) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const hay = [
+    project.address,
+    project.clientName,
+    project.manager,
+    project.managerName,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return hay.includes(q);
+}
+
 export function formatDate(value?: string | null, pattern = "d MMM yyyy") {
   if (!value) return "—";
   const date = parseISO(value);

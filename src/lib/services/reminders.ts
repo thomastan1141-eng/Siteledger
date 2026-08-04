@@ -12,7 +12,7 @@ import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS } from "../demo";
 import { remindersPath } from "../paths";
-import { todayKey } from "../utils";
+import { getProjectDisplayName, todayKey } from "../utils";
 import { hasUpdateOnDate } from "./updates";
 import type { Project, Reminder } from "../types";
 
@@ -63,11 +63,12 @@ export async function buildDashboardAlerts(projects: Project[]) {
 
     const updatedToday = await hasUpdateOnDate(project.id, today);
     if (!updatedToday) {
+      const title = getProjectDisplayName(project);
       alerts.push({
         projectId: project.id,
-        projectName: project.name,
+        projectName: title,
         type: "missing_today",
-        message: `${project.name} has not been updated today.`,
+        message: `${title} has not been updated today.`,
       });
     }
 
@@ -79,7 +80,7 @@ export async function buildDashboardAlerts(projects: Project[]) {
       if (days >= (project.staleDaysThreshold || 3)) {
         alerts.push({
           projectId: project.id,
-          projectName: project.name,
+          projectName: getProjectDisplayName(project),
           type: "stale",
           message: `This project has not received a site update for ${days} days.`,
         });
@@ -87,12 +88,15 @@ export async function buildDashboardAlerts(projects: Project[]) {
     }
 
     if (project.forecastStatus === "delayed" || project.forecastStatus === "slight_delay") {
-      alerts.push({
-        projectId: project.id,
-        projectName: project.name,
-        type: "delayed",
-        message: `${project.name} is currently ${project.forecastStatus === "delayed" ? "delayed" : "slightly delayed"}.`,
-      });
+      {
+        const title = getProjectDisplayName(project);
+        alerts.push({
+          projectId: project.id,
+          projectName: title,
+          type: "delayed",
+          message: `${title} is currently ${project.forecastStatus === "delayed" ? "delayed" : "slightly delayed"}.`,
+        });
+      }
     }
 
     if (project.forecastCompletionDate) {
@@ -101,12 +105,15 @@ export async function buildDashboardAlerts(projects: Project[]) {
         new Date(),
       );
       if ([30, 14, 7, 3].includes(daysLeft)) {
-        alerts.push({
-          projectId: project.id,
-          projectName: project.name,
-          type: "completion_soon",
-          message: `${project.name} forecast completion is in ${daysLeft} days. Please confirm the date.`,
-        });
+        {
+          const title = getProjectDisplayName(project);
+          alerts.push({
+            projectId: project.id,
+            projectName: title,
+            type: "completion_soon",
+            message: `${title} forecast completion is in ${daysLeft} days. Please confirm the date.`,
+          });
+        }
       }
     }
   }

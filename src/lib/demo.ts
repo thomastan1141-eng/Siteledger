@@ -1,4 +1,4 @@
-﻿import { COMPANY_ID } from "./constants";
+import { COMPANY_ID } from "./constants";
 import type {
   AppUser,
   DailyUpdate,
@@ -122,6 +122,7 @@ export const DEMO_PROJECTS: Project[] = [
     startDate: "2026-06-01",
     contractCompletionDate: "2026-11-30",
     forecastCompletionDate: "2026-12-05",
+    manager: "Demo Admin",
     managerId: "demo-admin",
     managerName: "Demo Admin",
     status: "in_progress",
@@ -164,6 +165,7 @@ export const DEMO_PROJECTS: Project[] = [
     startDate: "2026-04-15",
     contractCompletionDate: "2026-10-15",
     forecastCompletionDate: "2026-10-10",
+    manager: "Demo Admin",
     managerId: "demo-admin",
     managerName: "Demo Admin",
     status: "in_progress",
@@ -194,6 +196,7 @@ export const DEMO_PROJECTS: Project[] = [
     startDate: "2026-03-01",
     contractCompletionDate: "2026-09-30",
     forecastCompletionDate: "2026-10-20",
+    manager: "Demo Admin",
     managerId: "demo-admin",
     managerName: "Demo Admin",
     status: "in_progress",
@@ -224,6 +227,7 @@ export const DEMO_PROJECTS: Project[] = [
     startDate: "2026-08-10",
     contractCompletionDate: "2027-02-28",
     forecastCompletionDate: "2027-02-28",
+    manager: "Demo Admin",
     managerId: "demo-admin",
     managerName: "Demo Admin",
     status: "upcoming",
@@ -254,6 +258,7 @@ export const DEMO_PROJECTS: Project[] = [
     contractCompletionDate: "2026-05-30",
     forecastCompletionDate: "2026-05-28",
     actualCompletionDate: "2026-05-28",
+    manager: "Demo Admin",
     managerId: "demo-admin",
     managerName: "Demo Admin",
     status: "completed",

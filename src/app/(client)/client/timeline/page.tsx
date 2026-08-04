@@ -3,6 +3,7 @@
 import { SitePageHeader } from "@/components/progress/primitives";
 import { ProgressTimeline } from "@/components/progress/timeline";
 import { useClientProject } from "@/lib/client-project";
+import { getProjectDisplayName } from "@/lib/utils";
 
 export default function ClientTimelinePage() {
   const { project, timelineGroups, mediaByUpdate } = useClientProject();
@@ -12,7 +13,7 @@ export default function ClientTimelinePage() {
       <SitePageHeader
         kicker="Site journal"
         title="Progress story"
-        description={`Follow the renovation day by day for ${project.name}.`}
+        description={`Follow the renovation day by day for ${getProjectDisplayName(project)}.`}
       />
       <ProgressTimeline
         groups={timelineGroups}

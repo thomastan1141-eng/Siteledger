@@ -11,7 +11,11 @@ import {
   ProjectStatusPill,
 } from "@/components/progress/status";
 import type { Project } from "@/lib/types";
-import { formatDate } from "@/lib/utils";
+import {
+  formatDate,
+  getProjectDisplayName,
+  getProjectManagerName,
+} from "@/lib/utils";
 
 export type ProjectTabKey =
   | "overview"
@@ -49,9 +53,13 @@ export function ProjectChrome({
   return (
     <>
       <SitePageHeader
-        kicker={project.code}
-        title={project.name}
-        description={project.address}
+        kicker={project.clientName}
+        title={getProjectDisplayName(project)}
+        description={
+          getProjectManagerName(project)
+            ? `Manager · ${getProjectManagerName(project)}`
+            : undefined
+        }
         action={actions}
       />
 

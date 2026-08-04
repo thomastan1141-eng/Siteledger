@@ -49,9 +49,12 @@ export interface Project3DImage {
 export interface Project {
   id: string;
   companyId: string;
-  name: string;
-  code: string;
+  /** @deprecated legacy title — use address / getProjectDisplayName */
+  name?: string;
+  /** @deprecated legacy code — no longer collected or shown */
+  code?: string;
   clientName: string;
+  /** Primary project title / identifier */
   address: string;
   coverPhotoUrl?: string;
   /** External 3D tour / Matterport / Kuula / similar link */
@@ -65,7 +68,11 @@ export interface Project {
   contractCompletionDate?: string;
   forecastCompletionDate?: string;
   actualCompletionDate?: string;
+  /** Free-text manager name */
+  manager?: string;
+  /** @deprecated prefer manager */
   managerId?: string;
+  /** @deprecated prefer manager — kept for older records */
   managerName?: string;
   status: ProjectStatus;
   forecastStatus: ForecastStatus;

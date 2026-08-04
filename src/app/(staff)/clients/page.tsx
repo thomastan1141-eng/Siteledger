@@ -14,6 +14,7 @@ import { listProjects } from "@/lib/services/projects";
 import { inviteUser } from "@/lib/services/invites";
 import { listUsersByRole, setClientAccess } from "@/lib/services/users";
 import type { AppUser, Project, UserRole } from "@/lib/types";
+import { getProjectDisplayName } from "@/lib/utils";
 
 export default function ClientAccessPage() {
   const { profile } = useAuth();
@@ -158,7 +159,7 @@ export default function ClientAccessPage() {
               <option value="">No project yet</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {getProjectDisplayName(p)}
                 </option>
               ))}
             </SiteSelect>
@@ -216,7 +217,7 @@ function UserList({
               p.clientUserIds?.includes(user.uid) ||
               p.staffIds?.includes(user.uid),
           )
-          .map((p) => p.name)
+          .map((p) => getProjectDisplayName(p))
           .join(", ");
         return (
           <div

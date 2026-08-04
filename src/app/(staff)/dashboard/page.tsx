@@ -13,7 +13,7 @@ import { useAuth } from "@/lib/auth-context";
 import { listProjects } from "@/lib/services/projects";
 import { buildDashboardAlerts } from "@/lib/services/reminders";
 import type { Project } from "@/lib/types";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatDate, formatDateTime, getProjectDisplayName } from "@/lib/utils";
 
 export default function DashboardPage() {
   const { profile } = useAuth();
@@ -157,9 +157,9 @@ export default function DashboardPage() {
               ) : null}
             </div>
             <div className="site-project-meta">
-              <h3>{project.name}</h3>
+              <h3>{getProjectDisplayName(project)}</h3>
               <p>
-                {project.address}
+                {project.clientName}
                 <br />
                 Forecast {formatDate(project.forecastCompletionDate)}
               </p>

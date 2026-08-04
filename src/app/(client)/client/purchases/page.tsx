@@ -3,6 +3,7 @@
 import { SitePageHeader } from "@/components/progress/primitives";
 import { PurchasesPanel } from "@/components/progress/purchases-panel";
 import { useClientProject } from "@/lib/client-project";
+import { getProjectDisplayName } from "@/lib/utils";
 
 export default function ClientPurchasesPage() {
   const { project } = useClientProject();
@@ -11,8 +12,8 @@ export default function ClientPurchasesPage() {
     <div>
       <SitePageHeader
         kicker="Purchases"
-        title={project.name}
-        description={project.address}
+        title={getProjectDisplayName(project)}
+        description={project.clientName}
       />
       <PurchasesPanel project={project} clientMode />
     </div>

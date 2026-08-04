@@ -44,7 +44,13 @@ import type {
   ProjectStatus,
   ScheduleItem,
 } from "@/lib/types";
-import { formatBytes, formatDate, formatDateTime } from "@/lib/utils";
+import {
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  getProjectDisplayName,
+  getProjectManagerName,
+} from "@/lib/utils";
 
 export default function ProjectDetailsPage() {
   const { id } = useParams<{ id: string }>();
@@ -67,6 +73,9 @@ export default function ProjectDetailsPage() {
   );
   const [manageStagesOpen, setManageStagesOpen] = useState(false);
   const [edit, setEdit] = useState({
+    clientName: "",
+    manager: "",
+    address: "",
     forecastCompletionDate: "",
     contractCompletionDate: "",
     status: "in_progress" as ProjectStatus,
@@ -89,6 +98,9 @@ export default function ProjectDetailsPage() {
     setMedia(m);
     if (p) {
       setEdit({
+        clientName: p.clientName || "",
+        manager: getProjectManagerName(p),
+        address: p.address || "",
         forecastCompletionDate: p.forecastCompletionDate || "",
         contractCompletionDate: p.contractCompletionDate || "",
         status: p.status,
@@ -121,9 +133,18 @@ export default function ProjectDetailsPage() {
   async function saveSettings(e: FormEvent) {
     e.preventDefault();
     if (!project || profile?.role !== "admin") return;
+    if (!edit.address.trim()) return;
+    if (!edit.clientName.trim()) return;
     setSaving(true);
     try {
-      setProject(await updateProject(project.id, edit));
+      setProject(
+        await updateProject(project.id, {
+          ...edit,
+          clientName: edit.clientName.trim(),
+          manager: edit.manager.trim(),
+          address: edit.address.trim(),
+        }),
+      );
     } finally {
       setSaving(false);
     }
@@ -163,7 +184,7 @@ export default function ProjectDetailsPage() {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={getOverviewDisplayImage(project)}
-                  alt={project.name}
+                  alt={getProjectDisplayName(project)}
                 />
               ) : null}
               <div className="site-hero-visual-copy">
@@ -386,6 +407,39 @@ export default function ProjectDetailsPage() {
               gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
             }}
           >
+            <SiteField label="Client name">
+              <SiteInput
+                value={edit.clientName}
+                onChange={(e) =>
+                  setEdit((s) => ({ ...s, clientName: e.target.value }))
+                }
+                disabled={profile?.role !== "admin"}
+                required
+              />
+            </SiteField>
+            <SiteField label="Manager">
+              <SiteInput
+                value={edit.manager}
+                onChange={(e) =>
+                  setEdit((s) => ({ ...s, manager: e.target.value }))
+                }
+                placeholder="Enter manager name"
+                disabled={profile?.role !== "admin"}
+              />
+            </SiteField>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <SiteField label="Address">
+                <SiteInput
+                  value={edit.address}
+                  onChange={(e) =>
+                    setEdit((s) => ({ ...s, address: e.target.value }))
+                  }
+                  disabled={profile?.role !== "admin"}
+                  required
+                  placeholder="e.g. 19 Burnfoot Terrace"
+                />
+              </SiteField>
+            </div>
             <SiteField label="Contract completion">
               <SiteInput
                 type="date"

@@ -33,8 +33,6 @@ let demoProjects: Project[] = DEMO_PROJECTS.map((p) => ({
 }));
 
 type ProjectInput = {
-  name: string;
-  code: string;
   clientName: string;
   address: string;
   coverPhotoUrl?: string;
@@ -45,7 +43,10 @@ type ProjectInput = {
   startDate?: string;
   contractCompletionDate?: string;
   forecastCompletionDate?: string;
+  manager?: string;
+  /** @deprecated */
   managerId?: string;
+  /** @deprecated */
   managerName?: string;
   status?: ProjectStatus;
   internalNotes?: string;
@@ -61,7 +62,18 @@ type ProjectInput = {
 };
 
 function mapProject(id: string, data: Record<string, unknown>): Project {
-  const project = { id, ...(data as Omit<Project, "id">) };
+  const address = String(data.address || "").trim();
+  const manager = String(data.manager || data.managerName || "").trim();
+  const project = {
+    id,
+    ...(data as Omit<Project, "id">),
+    address,
+    clientName: String(data.clientName || "").trim(),
+    manager: manager || undefined,
+    managerName: manager || undefined,
+    name: data.name ? String(data.name) : undefined,
+    code: data.code ? String(data.code) : undefined,
+  };
   return {
     ...project,
     forecastStatus: project.forecastStatus || deriveForecastStatus(project),
@@ -134,27 +146,31 @@ export async function getProject(projectId: string) {
 }
 
 export async function createProject(input: ProjectInput) {
+  const address = input.address.trim();
+  if (!address) throw new Error("Address is required.");
+  const clientName = input.clientName.trim();
+  if (!clientName) throw new Error("Client name is required.");
+  const manager = (input.manager || input.managerName || "").trim();
+
   if (AUTH_BYPASS) {
     const now = new Date().toISOString();
     const created: Project = {
       id: `demo-${Date.now()}`,
       companyId: COMPANY_ID,
-      name: input.name,
-      code: input.code,
-      clientName: input.clientName,
-      address: input.address,
+      clientName,
+      address,
       coverPhotoUrl: input.coverPhotoUrl,
       startDate: input.startDate,
       contractCompletionDate: input.contractCompletionDate,
       forecastCompletionDate:
         input.forecastCompletionDate || input.contractCompletionDate,
-      managerId: input.managerId,
-      managerName: input.managerName,
+      manager: manager || undefined,
+      managerName: manager || undefined,
       status: input.status || "upcoming",
       forecastStatus: "on_track",
       clientUserIds: input.clientUserIds || [],
       staffIds: input.staffIds || [],
-      internalNotes: input.internalNotes,
+      internalNotes: input.internalNotes?.trim() || undefined,
       dailyReminderHour: input.dailyReminderHour ?? 17,
       staleDaysThreshold: input.staleDaysThreshold ?? 3,
       allowStaffPublish: input.allowStaffPublish ?? false,
@@ -176,25 +192,23 @@ export async function createProject(input: ProjectInput) {
   const now = new Date().toISOString();
   const draft: Omit<Project, "id"> = {
     companyId: COMPANY_ID,
-    name: input.name,
-    code: input.code,
-    clientName: input.clientName,
-    address: input.address,
-    coverPhotoUrl: input.coverPhotoUrl,
-    tour3dUrl: input.tour3dUrl,
-    tour3dLabel: input.tour3dLabel,
+    clientName,
+    address,
+    coverPhotoUrl: input.coverPhotoUrl || "",
+    tour3dUrl: input.tour3dUrl || "",
+    tour3dLabel: input.tour3dLabel || "",
     images3d: input.images3d || [],
-    startDate: input.startDate,
-    contractCompletionDate: input.contractCompletionDate,
+    startDate: input.startDate || "",
+    contractCompletionDate: input.contractCompletionDate || "",
     forecastCompletionDate:
-      input.forecastCompletionDate || input.contractCompletionDate,
-    managerId: input.managerId,
-    managerName: input.managerName,
+      input.forecastCompletionDate || input.contractCompletionDate || "",
+    manager,
+    managerName: manager,
     status: input.status || "upcoming",
     forecastStatus: "on_track",
     clientUserIds: input.clientUserIds || [],
     staffIds: input.staffIds || [],
-    internalNotes: input.internalNotes,
+    internalNotes: input.internalNotes?.trim() || "",
     dailyReminderHour: input.dailyReminderHour ?? 17,
     staleDaysThreshold: input.staleDaysThreshold ?? 3,
     allowStaffPublish: input.allowStaffPublish ?? false,
@@ -226,9 +240,28 @@ export async function updateProject(
   const current = await getProject(projectId);
   if (!current) throw new Error("Project not found");
 
+  const manager =
+    patch.manager !== undefined
+      ? patch.manager.trim()
+      : patch.managerName !== undefined
+        ? patch.managerName.trim()
+        : undefined;
+
   const next = {
     ...current,
     ...patch,
+    ...(patch.address !== undefined
+      ? { address: patch.address.trim() }
+      : {}),
+    ...(patch.clientName !== undefined
+      ? { clientName: patch.clientName.trim() }
+      : {}),
+    ...(manager !== undefined
+      ? { manager, managerName: manager }
+      : {}),
+    ...(patch.internalNotes !== undefined
+      ? { internalNotes: patch.internalNotes.trim() }
+      : {}),
     updatedAt: new Date().toISOString(),
   } as Project;
 

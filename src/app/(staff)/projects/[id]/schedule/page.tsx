@@ -14,6 +14,7 @@ import { WeekTimeline } from "@/components/progress/week-timeline";
 import { getProject } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
 import type { Project, ScheduleItem } from "@/lib/types";
+import { getProjectDisplayName } from "@/lib/utils";
 
 /**
  * Kept for deep links / bookmarks. Primary schedule entry is Project Overview.
@@ -44,7 +45,7 @@ export default function SchedulePage() {
   return (
     <div>
       <SitePageHeader
-        kicker={project.code}
+        kicker={getProjectDisplayName(project)}
         title="Project schedule"
         description="Same timeline and monthly calendar as Overview. Prefer Overview for day-to-day viewing."
         action={

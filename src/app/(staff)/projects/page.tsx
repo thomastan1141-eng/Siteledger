@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   SiteButton,
+  SiteInput,
   SitePageHeader,
   SiteSpinner,
 } from "@/components/progress/primitives";
@@ -11,11 +12,17 @@ import { ForecastPill, ProjectStatusPill } from "@/components/progress/status";
 import { useAuth } from "@/lib/auth-context";
 import { listProjects } from "@/lib/services/projects";
 import type { Project } from "@/lib/types";
-import { formatDate } from "@/lib/utils";
+import {
+  formatDate,
+  getProjectDisplayName,
+  getProjectManagerName,
+  matchesProjectSearch,
+} from "@/lib/utils";
 
 export default function ProjectsPage() {
   const { profile } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -27,6 +34,8 @@ export default function ProjectsPage() {
   }, [profile]);
 
   if (loading) return <SiteSpinner />;
+
+  const visible = projects.filter((p) => matchesProjectSearch(p, query));
 
   return (
     <div>
@@ -43,7 +52,16 @@ export default function ProjectsPage() {
         }
       />
 
-      {projects.map((project) => (
+      <div style={{ maxWidth: 420, marginBottom: 18 }}>
+        <SiteInput
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search address, client, or manager"
+          aria-label="Search projects"
+        />
+      </div>
+
+      {visible.map((project) => (
         <Link
           key={project.id}
           href={`/projects/${project.id}`}
@@ -56,11 +74,12 @@ export default function ProjectsPage() {
             ) : null}
           </div>
           <div className="site-project-meta">
-            <h3>{project.name}</h3>
+            <h3>{getProjectDisplayName(project)}</h3>
             <p>
-              {project.clientName} · {project.code}
-              <br />
-              {project.address}
+              {project.clientName}
+              {getProjectManagerName(project)
+                ? ` · ${getProjectManagerName(project)}`
+                : ""}
             </p>
           </div>
           <div className="site-project-side">
@@ -78,6 +97,11 @@ export default function ProjectsPage() {
       {!projects.length ? (
         <p style={{ color: "var(--site-text-secondary)" }}>
           No projects yet. Create the first site journal.
+        </p>
+      ) : null}
+      {projects.length && !visible.length ? (
+        <p style={{ color: "var(--site-text-secondary)" }}>
+          No projects match this search.
         </p>
       ) : null}
     </div>

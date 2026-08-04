@@ -6,6 +6,7 @@ import { JournalComposer } from "@/components/progress/journal-composer";
 import { SitePageHeader, SiteSpinner } from "@/components/progress/primitives";
 import { getProject } from "@/lib/services/projects";
 import type { Project } from "@/lib/types";
+import { getProjectDisplayName } from "@/lib/utils";
 
 export default function DailyUpdatePage() {
   const { id } = useParams<{ id: string }>();
@@ -30,7 +31,7 @@ export default function DailyUpdatePage() {
     <div>
       <SitePageHeader
         kicker="Daily journal"
-        title={project.name}
+        title={getProjectDisplayName(project)}
         description="Select work, upload multiple photos or videos, then publish."
       />
       <JournalComposer

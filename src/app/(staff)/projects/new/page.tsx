@@ -14,8 +14,7 @@ import { COMMON_STAGE_OPTIONS } from "@/lib/constants";
 import { useAuth } from "@/lib/auth-context";
 import { createProject } from "@/lib/services/projects";
 import { createManyStages } from "@/lib/services/schedule";
-import { listUsersByRole } from "@/lib/services/users";
-import type { AppUser, ProjectStatus } from "@/lib/types";
+import type { ProjectStatus } from "@/lib/types";
 
 type CustomDraft = {
   name: string;
@@ -36,21 +35,18 @@ const emptyCustom = (): CustomDraft => ({
 export default function NewProjectPage() {
   const { profile } = useAuth();
   const router = useRouter();
-  const [managers, setManagers] = useState<AppUser[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
   const [customs, setCustoms] = useState<CustomDraft[]>([]);
   const [customDraft, setCustomDraft] = useState<CustomDraft>(emptyCustom());
   const [form, setForm] = useState({
-    name: "",
-    code: "",
     clientName: "",
+    manager: "",
     address: "",
     startDate: "",
     contractCompletionDate: "",
     forecastCompletionDate: "",
-    managerId: "",
     status: "upcoming" as ProjectStatus,
     internalNotes: "",
     allowStaffPublish: false,
@@ -59,11 +55,7 @@ export default function NewProjectPage() {
   useEffect(() => {
     if (profile?.role !== "admin") {
       router.replace("/projects");
-      return;
     }
-    listUsersByRole().then((users) =>
-      setManagers(users.filter((u) => u.role === "admin" || u.role === "staff")),
-    );
   }, [profile, router]);
 
   async function onSubmit(e: FormEvent) {
@@ -71,12 +63,17 @@ export default function NewProjectPage() {
     setBusy(true);
     setError("");
     try {
-      const manager = managers.find((m) => m.uid === form.managerId);
       const project = await createProject({
-        ...form,
-        managerName: manager?.displayName,
+        clientName: form.clientName,
+        manager: form.manager,
+        address: form.address,
+        startDate: form.startDate || undefined,
+        contractCompletionDate: form.contractCompletionDate || undefined,
         forecastCompletionDate:
-          form.forecastCompletionDate || form.contractCompletionDate,
+          form.forecastCompletionDate || form.contractCompletionDate || undefined,
+        status: form.status,
+        internalNotes: form.internalNotes,
+        allowStaffPublish: form.allowStaffPublish,
       });
 
       const stageInputs = [
@@ -139,12 +136,6 @@ export default function NewProjectPage() {
           gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
         }}
       >
-        <SiteField label="Project name">
-          <SiteInput value={form.name} onChange={(e) => set("name", e.target.value)} required />
-        </SiteField>
-        <SiteField label="Project code">
-          <SiteInput value={form.code} onChange={(e) => set("code", e.target.value)} required />
-        </SiteField>
         <SiteField label="Client name">
           <SiteInput
             value={form.clientName}
@@ -153,17 +144,11 @@ export default function NewProjectPage() {
           />
         </SiteField>
         <SiteField label="Manager">
-          <SiteSelect
-            value={form.managerId}
-            onChange={(e) => set("managerId", e.target.value)}
-          >
-            <option value="">Select manager</option>
-            {managers.map((m) => (
-              <option key={m.uid} value={m.uid}>
-                {m.displayName}
-              </option>
-            ))}
-          </SiteSelect>
+          <SiteInput
+            value={form.manager}
+            onChange={(e) => set("manager", e.target.value)}
+            placeholder="Enter manager name"
+          />
         </SiteField>
         <div style={{ gridColumn: "1 / -1" }}>
           <SiteField label="Address">
@@ -171,6 +156,7 @@ export default function NewProjectPage() {
               value={form.address}
               onChange={(e) => set("address", e.target.value)}
               required
+              placeholder="e.g. 19 Burnfoot Terrace"
             />
           </SiteField>
         </div>

@@ -12,6 +12,7 @@ import { useAuth } from "@/lib/auth-context";
 import { listProjects } from "@/lib/services/projects";
 import { listMedia } from "@/lib/services/media";
 import type { MediaItem, Project } from "@/lib/types";
+import { getProjectDisplayName } from "@/lib/utils";
 
 export default function MediaLibraryPage() {
   const { profile } = useAuth();
@@ -74,7 +75,7 @@ export default function MediaLibraryPage() {
         >
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name}
+              {getProjectDisplayName(p)}
             </option>
           ))}
         </SiteSelect>
