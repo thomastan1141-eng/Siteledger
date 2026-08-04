@@ -141,6 +141,8 @@ export function JournalComposer({
     try {
       await publishDailyUpdate({
         projectId: project.id,
+        workspaceId:
+          project.workspaceId || project.companyId || profile.defaultWorkspaceId,
         workItems: noWorkToday ? [] : selected,
         customActivities: noWorkToday ? [] : customActivities,
         noWorkToday,

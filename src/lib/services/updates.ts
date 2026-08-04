@@ -31,6 +31,7 @@ let demoUpdates: DailyUpdate[] = [...DEMO_UPDATES];
 
 type PublishUpdateInput = {
   projectId: string;
+  workspaceId?: string;
   workItems: string[];
   customActivities: string[];
   noWorkToday: boolean;
@@ -165,33 +166,52 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
   }
 
   const date = input.date || todayKey();
+  const workspaceId = input.workspaceId?.trim() || COMPANY_ID;
   const mediaVisibility = toMediaVisibility(input.visibility);
   const mediaIds: string[] = [];
   let photoCount = 0;
   let videoCount = 0;
   let storageBytes = 0;
 
+  const { uploadVideoFileViaBunny } = await import("../bunny/client-upload");
+
   for (const file of input.files) {
+    if (isVideoFile(file)) {
+      const mediaId = await uploadVideoFileViaBunny({
+        projectId: input.projectId,
+        workspaceId,
+        file,
+        title: file.name,
+        clientVisible: mediaVisibility === "client_visible",
+        onProgress: (pct) => input.onFileProgress?.(file.name, pct),
+      });
+      mediaIds.push(mediaId);
+      storageBytes += file.size;
+      videoCount += 1;
+      continue;
+    }
+
     const uploaded = await uploadMediaFile(input.projectId, file, {
       date,
       visibility: mediaVisibility,
+      workspaceId,
       onProgress: (pct) => input.onFileProgress?.(file.name, pct),
     });
 
     const media = await createMediaRecord(input.projectId, {
       updateId: undefined,
       type: uploaded.type,
+      provider: "FIREBASE_STORAGE",
+      workspaceId,
       storagePath: uploaded.storagePath,
       downloadUrl: uploaded.downloadUrl,
       fileName: uploaded.fileName,
       contentType: uploaded.contentType,
       sizeBytes: uploaded.sizeBytes,
-      workItems: [
-        ...input.workItems,
-        ...input.customActivities,
-      ],
+      workItems: [...input.workItems, ...input.customActivities],
       caption: input.note,
       visibility: mediaVisibility,
+      clientVisible: mediaVisibility === "client_visible",
       uploadedBy: input.createdBy,
       uploadedByName: input.createdByName,
       date,
@@ -199,14 +219,13 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
 
     mediaIds.push(media.id);
     storageBytes += uploaded.sizeBytes;
-    if (uploaded.type === "photo") photoCount += 1;
-    else videoCount += 1;
+    photoCount += 1;
   }
 
   const now = new Date().toISOString();
   const updateData: Omit<DailyUpdate, "id"> = {
     projectId: input.projectId,
-    companyId: COMPANY_ID,
+    companyId: workspaceId,
     date,
     workItems: input.workItems,
     customActivities: input.customActivities,
@@ -223,16 +242,23 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
   };
 
   const ref = await addDoc(
-    collection(getFirebaseDb(), updatesPath(input.projectId)),
+    collection(getFirebaseDb(), updatesPath(input.projectId, workspaceId)),
     updateData,
   );
 
   // Link media back to update
   await Promise.all(
     mediaIds.map((id) =>
-      updateDoc(doc(getFirebaseDb(), `companies/${COMPANY_ID}/projects/${input.projectId}/media`, id), {
-        updateId: ref.id,
-      }),
+      updateDoc(
+        doc(
+          getFirebaseDb(),
+          `companies/${workspaceId}/projects/${input.projectId}/media`,
+          id,
+        ),
+        {
+          updateId: ref.id,
+        },
+      ),
     ),
   );
 
@@ -247,14 +273,18 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
 
   // Increment counters via read-modify in updateProject caller style
   const { getProject } = await import("./projects");
-  const project = await getProject(input.projectId);
+  const project = await getProject(input.projectId, workspaceId);
   if (project) {
-    await updateProject(input.projectId, {
-      ...projectPatch,
-      photoCount: project.photoCount + photoCount,
-      videoCount: project.videoCount + videoCount,
-      storageBytes: project.storageBytes + storageBytes,
-    });
+    await updateProject(
+      input.projectId,
+      {
+        ...projectPatch,
+        photoCount: project.photoCount + photoCount,
+        videoCount: project.videoCount + videoCount,
+        storageBytes: project.storageBytes + storageBytes,
+      },
+      workspaceId,
+    );
   }
 
   return { id: ref.id, ...updateData };

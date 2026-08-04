@@ -50,10 +50,11 @@ export function ClientProjectProvider({ children }: { children: ReactNode }) {
       setProject(null);
       return;
     }
+    const ws = next.workspaceId || next.companyId;
     const [s, u, m] = await Promise.all([
-      listSchedule(next.id, { clientOnly: true }),
+      listSchedule(next.id, { clientOnly: true, workspaceId: ws }),
       listUpdates(next.id, { clientOnly: true }),
-      listMedia(next.id, { clientOnly: true }),
+      listMedia(next.id, { clientOnly: true, workspaceId: ws }),
     ]);
     setProject(next);
     setSchedule(s);

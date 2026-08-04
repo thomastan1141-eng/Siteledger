@@ -11,6 +11,7 @@ import {
   SiteSpinner,
   SiteTextarea,
 } from "@/components/progress/primitives";
+import { BunnyVideoUploader } from "@/components/media/bunny-video-uploader";
 import { ProgressMediaGrid } from "@/components/progress/media-grid";
 import { ProgressTimeline } from "@/components/progress/timeline";
 import { JournalComposer } from "@/components/progress/journal-composer";
@@ -86,11 +87,12 @@ export default function ProjectDetailsPage() {
   });
 
   async function reload() {
-    const [p, s, u, m] = await Promise.all([
-      getProject(id),
-      listSchedule(id),
+    const p = await getProject(id);
+    const ws = p?.workspaceId || p?.companyId;
+    const [s, u, m] = await Promise.all([
+      listSchedule(id, { workspaceId: ws }),
       listUpdates(id),
-      listMedia(id),
+      listMedia(id, { workspaceId: ws }),
     ]);
     setProject(p);
     setSchedule(s);
@@ -358,6 +360,9 @@ export default function ProjectDetailsPage() {
             <ProgressMediaGrid
               items={media.slice(0, 8)}
               allowDownload
+              workspaceId={project.workspaceId || project.companyId}
+              canDelete={profile?.role === "admin"}
+              onChanged={() => void reload()}
             />
           </SiteSection>
 
@@ -387,7 +392,24 @@ export default function ProjectDetailsPage() {
         </>
       ) : null}
 
-      {tab === "media" ? <ProgressMediaGrid items={media} allowDownload /> : null}
+      {tab === "media" ? (
+        <div style={{ display: "grid", gap: 16 }}>
+          {profile?.role !== "client" ? (
+            <BunnyVideoUploader
+              projectId={project.id}
+              workspaceId={project.workspaceId || project.companyId}
+              onUploaded={() => void reload()}
+            />
+          ) : null}
+          <ProgressMediaGrid
+            items={media}
+            allowDownload
+            workspaceId={project.workspaceId || project.companyId}
+            canDelete={profile?.role === "admin"}
+            onChanged={() => void reload()}
+          />
+        </div>
+      ) : null}
 
       <ManageStagesDialog
         projectId={project.id}

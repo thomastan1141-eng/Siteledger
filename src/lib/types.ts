@@ -9,9 +9,23 @@ export type SubscriptionStatus =
   | "PAST_DUE"
   | "CANCELLED";
 
-export type WorkspaceMemberRole = "OWNER" | "ADMIN" | "STAFF";
+/** Workspace member roles. Product “Organization” uses the same set plus MANAGER/VIEWER. */
+export type WorkspaceMemberRole =
+  | "OWNER"
+  | "ADMIN"
+  | "MANAGER"
+  | "STAFF"
+  | "VIEWER";
 
-export type WorkspaceMemberStatus = "ACTIVE" | "INVITED" | "DISABLED";
+export type WorkspaceMemberStatus =
+  | "ACTIVE"
+  | "INVITED"
+  | "DISABLED"
+  | "MIGRATED"
+  | "ARCHIVED";
+
+/** Organization type — stored on workspace docs when company features are enabled. */
+export type OrganizationType = "PERSONAL" | "COMPANY";
 
 export type ProjectStatus =
   | "upcoming"
@@ -81,6 +95,10 @@ export interface Workspace {
   id: string;
   name: string;
   ownerUid: string;
+  /** Personal studio vs company organization. Defaults to PERSONAL when omitted. */
+  type?: OrganizationType;
+  /** ACTIVE normal; MIGRATED/ARCHIVED after personal→company transfer. */
+  status?: "ACTIVE" | "MIGRATED" | "ARCHIVED";
   plan: WorkspacePlan;
   subscriptionStatus: SubscriptionStatus;
   trialStartsAt: string | null;
@@ -244,27 +262,67 @@ export interface DailyUpdate {
   updatedAt: string;
 }
 
+export type MediaProvider = "FIREBASE_STORAGE" | "BUNNY_STREAM";
+
+export type BunnyVideoStatus =
+  | "INITIALIZING"
+  | "UPLOADING"
+  | "PROCESSING"
+  | "PLAYABLE"
+  | "READY"
+  | "FAILED"
+  | "DELETING"
+  | "DELETED"
+  | "CANCELLED";
+
 export interface MediaItem {
   id: string;
   projectId: string;
+  /** Path tenant key (equals workspaceId for studio accounts). */
   companyId: string;
+  /** Authoritative tenant field for new media records. */
+  workspaceId?: string;
   updateId?: string;
   type: MediaType;
+  provider?: MediaProvider;
   storagePath: string;
   downloadUrl: string;
   thumbnailUrl?: string;
+  thumbnailBlurhash?: string | null;
   fileName: string;
   contentType: string;
   sizeBytes: number;
   durationSeconds?: number;
+  width?: number | null;
+  height?: number | null;
+  storageSizeBytes?: number | null;
+  availableResolutions?: string | null;
   workItems: string[];
   room?: string;
   caption?: string;
+  title?: string | null;
+  description?: string | null;
+  /** Prefer this for Bunny videos; kept in sync with visibility for clients. */
+  clientVisible?: boolean;
   visibility: MediaVisibility;
   uploadedBy: string;
   uploadedByName: string;
   date: string;
   createdAt: string;
+  updatedAt?: string;
+  readyAt?: string | null;
+  deletedAt?: string | null;
+  /** Bunny Stream fields — server-controlled. */
+  bunnyLibraryId?: number | string;
+  bunnyVideoId?: string;
+  status?: BunnyVideoStatus;
+  encodeProgress?: number | null;
+  originalFileName?: string;
+  mimeType?: string;
+  sourceSizeBytes?: number;
+  clientUploadId?: string;
+  errorCode?: string | null;
+  errorMessage?: string | null;
 }
 
 export interface Reminder {

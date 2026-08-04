@@ -1,12 +1,15 @@
 "use client";
 
+import { SecureBunnyPlayer } from "@/components/media/secure-bunny-player";
 import { SiteEmpty, SitePageHeader } from "@/components/progress/primitives";
 import { useClientProject } from "@/lib/client-project";
 import { formatDate } from "@/lib/utils";
 
 export default function ClientVideosPage() {
-  const { clientMedia } = useClientProject();
+  const { clientMedia, project } = useClientProject();
   const videos = clientMedia.filter((m) => m.type === "video");
+  const workspaceId =
+    project?.workspaceId || project?.companyId || "";
 
   return (
     <div>
@@ -22,18 +25,22 @@ export default function ClientVideosPage() {
         <div style={{ display: "grid", gap: 24 }}>
           {videos.map((video) => (
             <article key={video.id}>
-              <video
-                src={video.downloadUrl}
-                controls
-                playsInline
-                preload="metadata"
-                style={{
-                  width: "100%",
-                  aspectRatio: "16 / 9",
-                  background: "#111",
-                  borderRadius: 12,
-                }}
-              />
+              {video.provider === "BUNNY_STREAM" ? (
+                <SecureBunnyPlayer item={video} workspaceId={workspaceId} />
+              ) : (
+                <video
+                  src={video.downloadUrl}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  style={{
+                    width: "100%",
+                    aspectRatio: "16 / 9",
+                    background: "#111",
+                    borderRadius: 12,
+                  }}
+                />
+              )}
               <div style={{ marginTop: 10 }}>
                 <div style={{ fontWeight: 650 }}>{formatDate(video.date)}</div>
                 <div
@@ -44,7 +51,9 @@ export default function ClientVideosPage() {
                   }}
                 >
                   {video.workItems.join(" · ") || "Site update"}
-                  {video.caption ? ` — ${video.caption}` : ""}
+                  {video.caption || video.title
+                    ? ` — ${video.title || video.caption}`
+                    : ""}
                 </div>
               </div>
             </article>

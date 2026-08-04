@@ -249,18 +249,42 @@ service cloud.firestore {
         }
 
         match /media/{mediaId} {
-          allow read: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId)
-            || (isCompanyClient(companyId)
-                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
-                && resource.data.visibility in ['client_visible', 'handover']);
-          allow create: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId);
-          allow update, delete: if isTenantAdmin(companyId)
-            || isCompanyStaffSide(companyId)
-            || isWorkspaceMember(companyId);
+          allow read: if (isTenantAdmin(companyId)
+              || isCompanyStaffSide(companyId)
+              || isWorkspaceMember(companyId)
+              || (isCompanyClient(companyId)
+                  && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
+                  && (
+                    resource.data.clientVisible == true
+                    || resource.data.visibility in ['client_visible', 'handover']
+                  )))
+            && (
+              !('status' in resource.data)
+              || !(resource.data.status in ['DELETED', 'CANCELLED'])
+            );
+
+          // Photos may be created by staff clients; Bunny videos are Admin SDK only.
+          allow create: if (isTenantAdmin(companyId)
+              || isCompanyStaffSide(companyId)
+              || isWorkspaceMember(companyId))
+            && (
+              !('provider' in request.resource.data)
+              || request.resource.data.provider != 'BUNNY_STREAM'
+            )
+            && !('bunnyVideoId' in request.resource.data);
+
+          allow update: if (isTenantAdmin(companyId)
+              || isCompanyStaffSide(companyId)
+              || isWorkspaceMember(companyId))
+            && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny([
+                'bunnyVideoId', 'bunnyLibraryId', 'provider',
+                'workspaceId', 'companyId', 'projectId', 'uploadedBy',
+                'createdAt', 'readyAt', 'status', 'storageSizeBytes',
+                'encodeProgress', 'sourceSizeBytes', 'clientUploadId'
+              ]);
+
+          allow delete: if isTenantAdmin(companyId);
         }
 
         match /purchases/{purchaseId} {

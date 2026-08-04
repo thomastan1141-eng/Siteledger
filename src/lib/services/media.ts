@@ -38,23 +38,31 @@ export async function uploadMediaFile(
   options: {
     date?: string;
     visibility: MediaVisibility;
+    workspaceId?: string;
     onProgress?: (pct: number) => void;
   },
 ) {
+  if (isVideoFile(file)) {
+    throw new Error(
+      "Videos must be uploaded through Bunny Stream. Use the video uploader.",
+    );
+  }
+
   const date = options.date || todayKey();
-  const kind = isVideoFile(file)
-    ? "videos"
-    : options.visibility === "handover"
+  const kind =
+    options.visibility === "handover"
       ? "handover"
       : options.visibility === "internal"
         ? "internal"
         : "photos";
+  const tenant = options.workspaceId?.trim() || COMPANY_ID;
 
   const path = storageMediaPath(
     projectId,
     date,
     kind,
     uniqueFileName(file),
+    tenant,
   );
   const storageRef = ref(getFirebaseStorage(), path);
   const task = uploadBytesResumable(storageRef, file, {
@@ -89,16 +97,30 @@ export async function uploadMediaFile(
 
 export async function createMediaRecord(
   projectId: string,
-  input: Omit<MediaItem, "id" | "projectId" | "companyId" | "createdAt">,
+  input: Omit<MediaItem, "id" | "projectId" | "companyId" | "createdAt"> & {
+    workspaceId?: string;
+  },
 ) {
+  const workspaceId = input.workspaceId?.trim() || COMPANY_ID;
   const data: Omit<MediaItem, "id"> = {
     ...input,
     projectId,
-    companyId: COMPANY_ID,
+    companyId: workspaceId,
+    workspaceId,
+    provider: input.provider || "FIREBASE_STORAGE",
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
-  const refDoc = await addDoc(collection(getFirebaseDb(), mediaPath(projectId)), data);
+  const refDoc = await addDoc(
+    collection(getFirebaseDb(), mediaPath(projectId, workspaceId)),
+    data,
+  );
   return { id: refDoc.id, ...data };
+}
+
+function isActiveMedia(item: MediaItem) {
+  if (!item.status) return true;
+  return item.status !== "DELETED" && item.status !== "CANCELLED";
 }
 
 export async function listMedia(
@@ -108,14 +130,16 @@ export async function listMedia(
     type?: MediaType;
     workItem?: string;
     date?: string;
+    workspaceId?: string;
   },
 ) {
+  const workspaceId = options?.workspaceId?.trim() || COMPANY_ID;
   let items = AUTH_BYPASS
     ? demoMedia.filter((m) => m.projectId === projectId)
     : (
         await getDocs(
           query(
-            collection(getFirebaseDb(), mediaPath(projectId)),
+            collection(getFirebaseDb(), mediaPath(projectId, workspaceId)),
             orderBy("createdAt", "desc"),
           ),
         )
@@ -124,9 +148,14 @@ export async function listMedia(
           ({ id: d.id, ...(d.data() as Omit<MediaItem, "id">) }) as MediaItem,
       );
 
+  items = items.filter(isActiveMedia);
+
   if (options?.clientOnly) {
     items = items.filter(
-      (m) => m.visibility === "client_visible" || m.visibility === "handover",
+      (m) =>
+        m.clientVisible === true ||
+        m.visibility === "client_visible" ||
+        m.visibility === "handover",
     );
   }
   if (options?.type) {
@@ -146,10 +175,17 @@ export async function updateMediaVisibility(
   projectId: string,
   mediaIds: string[],
   visibility: MediaVisibility,
+  workspaceId?: string,
 ) {
+  const ws = workspaceId?.trim() || COMPANY_ID;
   const batch = writeBatch(getFirebaseDb());
   mediaIds.forEach((id) => {
-    batch.update(doc(getFirebaseDb(), mediaPath(projectId), id), { visibility });
+    batch.update(doc(getFirebaseDb(), mediaPath(projectId, ws), id), {
+      visibility,
+      clientVisible:
+        visibility === "client_visible" || visibility === "handover",
+      updatedAt: new Date().toISOString(),
+    });
   });
   await batch.commit();
 }
@@ -158,8 +194,13 @@ export async function updateMediaCaption(
   projectId: string,
   mediaId: string,
   caption: string,
+  workspaceId?: string,
 ) {
-  await updateDoc(doc(getFirebaseDb(), mediaPath(projectId), mediaId), { caption });
+  const ws = workspaceId?.trim() || COMPANY_ID;
+  await updateDoc(doc(getFirebaseDb(), mediaPath(projectId, ws), mediaId), {
+    caption,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export function detectMediaKind(file: File): MediaType | null {

@@ -30,3 +30,21 @@ env:
     availability:
       - BUILD
       - RUNTIME
+
+  # Bunny Stream — library id is public config; keys are secrets
+  - variable: BUNNY_STREAM_LIBRARY_ID
+    value: "720303"
+    availability:
+      - RUNTIME
+  - variable: BUNNY_STREAM_API_KEY
+    secret: BUNNY_STREAM_API_KEY
+    availability:
+      - RUNTIME
+  - variable: BUNNY_STREAM_READ_ONLY_API_KEY
+    secret: BUNNY_STREAM_READ_ONLY_API_KEY
+    availability:
+      - RUNTIME
+  - variable: BUNNY_STREAM_EMBED_TOKEN_KEY
+    secret: BUNNY_STREAM_EMBED_TOKEN_KEY
+    availability:
+      - RUNTIME

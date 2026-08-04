@@ -10,6 +10,7 @@ import {
   LogOut,
   Route,
   ShoppingBag,
+  UserRound,
 } from "lucide-react";
 import { PLATFORM_KICKER, PLATFORM_NAME } from "@/lib/constants";
 import { useAuth } from "@/lib/auth-context";
@@ -23,6 +24,7 @@ const NAV = [
   { href: "/client/videos", label: "Videos", icon: Film },
   { href: "/client/completed", label: "Stages", icon: CheckCircle2 },
   { href: "/client/purchases", label: "Purchases", icon: ShoppingBag },
+  { href: "/client/account", label: "Account", icon: UserRound },
 ];
 
 export function ProgressClientShell({ children }: { children: React.ReactNode }) {

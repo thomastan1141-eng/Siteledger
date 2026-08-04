@@ -7,6 +7,7 @@ import {
   SiteSelect,
   SiteSpinner,
 } from "@/components/progress/primitives";
+import { BunnyVideoUploader } from "@/components/media/bunny-video-uploader";
 import { ProgressMediaGrid } from "@/components/progress/media-grid";
 import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -23,9 +24,14 @@ export default function MediaLibraryPage() {
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
+  const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "";
+
+  function reloadMedia() {
+    if (!projectId || !ws) return;
+    listMedia(projectId, { workspaceId: ws }).then(setMedia);
+  }
 
   useEffect(() => {
-    const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId;
     if (!ws) {
       setLoading(false);
       return;
@@ -38,12 +44,12 @@ export default function MediaLibraryPage() {
       if (data[0]) setProjectId(data[0].id);
       setLoading(false);
     });
-  }, [profile, workspaceId]);
+  }, [profile, ws]);
 
   useEffect(() => {
-    if (!projectId) return;
-    listMedia(projectId).then(setMedia);
-  }, [projectId]);
+    if (!projectId || !ws) return;
+    listMedia(projectId, { workspaceId: ws }).then(setMedia);
+  }, [projectId, ws]);
 
   const filtered = media.filter((item) => {
     if (filter === "all") return true;
@@ -97,7 +103,23 @@ export default function MediaLibraryPage() {
         </SiteSelect>
       </div>
 
-      <ProgressMediaGrid items={filtered} allowDownload />
+      {projectId && ws && profile?.role !== "client" ? (
+        <div style={{ marginBottom: 20 }}>
+          <BunnyVideoUploader
+            projectId={projectId}
+            workspaceId={ws}
+            onUploaded={() => reloadMedia()}
+          />
+        </div>
+      ) : null}
+
+      <ProgressMediaGrid
+        items={filtered}
+        allowDownload
+        workspaceId={ws}
+        canDelete={profile?.role === "admin"}
+        onChanged={reloadMedia}
+      />
     </div>
   );
 }
