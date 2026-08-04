@@ -9,44 +9,45 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email_verified == true;
     }
 
-    function accountDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    function accountPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
     function hasAccount() {
-      return signedIn() && accountDoc().exists;
+      return signedIn() && exists(accountPath());
     }
 
     function account() {
-      return accountDoc().data;
+      return get(accountPath()).data;
     }
 
-    function memberDoc(workspaceId) {
-      return get(/databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid));
+    function memberPath(workspaceId) {
+      return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid);
     }
 
     function isWorkspaceMember(workspaceId) {
       return isVerifiedUser()
-        && memberDoc(workspaceId).exists
-        && memberDoc(workspaceId).data.status == 'ACTIVE';
+        && exists(memberPath(workspaceId))
+        && get(memberPath(workspaceId)).data.status == 'ACTIVE';
     }
 
     function isWorkspaceOwner(workspaceId) {
       return isWorkspaceMember(workspaceId)
-        && memberDoc(workspaceId).data.role == 'OWNER';
+        && get(memberPath(workspaceId)).data.role == 'OWNER';
     }
 
-    function companyUserDoc(companyId) {
-      return get(/databases/$(database)/documents/companies/$(companyId)/users/$(request.auth.uid));
+    function companyUserPath(companyId) {
+      return /databases/$(database)/documents/companies/$(companyId)/users/$(request.auth.uid);
     }
 
     function hasCompanyUser(companyId) {
-      return signedIn() && companyUserDoc(companyId).exists
-        && companyUserDoc(companyId).data.active == true;
+      return signedIn()
+        && exists(companyUserPath(companyId))
+        && get(companyUserPath(companyId)).data.active == true;
     }
 
     function companyProfile(companyId) {
-      return companyUserDoc(companyId).data;
+      return get(companyUserPath(companyId)).data;
     }
 
     function isCompanyAdmin(companyId) {
@@ -82,17 +83,6 @@ service cloud.firestore {
 
     function projectDoc(companyId, projectId) {
       return get(/databases/$(database)/documents/companies/$(companyId)/projects/$(projectId)).data;
-    }
-
-    function canAccessProject(companyId, projectId) {
-      return isCompanyAdmin(companyId)
-        || (isCompanyStaffSide(companyId) && (
-          request.auth.uid in projectDoc(companyId, projectId).staffIds
-          || projectDoc(companyId, projectId).managerId == request.auth.uid
-          || isWorkspaceMember(companyId)
-        ))
-        || (isCompanyClient(companyId)
-            && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
     }
 
     // ---- Top-level SaaS users ----
