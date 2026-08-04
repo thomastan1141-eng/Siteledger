@@ -4,12 +4,12 @@ import {
   findMediaByBunnyVideoId,
   updateMediaAdmin,
 } from "@/lib/bunny/media-store";
-import { getBunnyLibraryId } from "@/lib/bunny/config";
 import {
   getBunnyVideo,
   mapBunnyWebhookStatus,
   verifyBunnyWebhookSignature,
 } from "@/lib/bunny/server";
+import { bunnyConfig } from "@/lib/server/bunny-config";
 import type { BunnyVideoStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     };
 
     const libraryId = String(payload.VideoLibraryId || "");
-    if (libraryId !== getBunnyLibraryId()) {
+    if (libraryId !== bunnyConfig.libraryId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

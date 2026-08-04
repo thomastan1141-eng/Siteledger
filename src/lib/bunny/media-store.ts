@@ -1,6 +1,8 @@
+import "server-only";
+
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase-admin";
-import { getBunnyLibraryId } from "./config";
+import { bunnyConfig } from "@/lib/server/bunny-config";
 import type { BunnyVideoDetails } from "./server";
 import type { BunnyVideoStatus, MediaVisibility } from "@/lib/types";
 
@@ -85,7 +87,7 @@ export async function createBunnyMediaRecord(input: {
     caption: input.title || input.description || "",
     clientVisible: input.clientVisible,
     visibility,
-    bunnyLibraryId: Number(getBunnyLibraryId()) || getBunnyLibraryId(),
+    bunnyLibraryId: Number(bunnyConfig.libraryId) || bunnyConfig.libraryId,
     bunnyVideoId: input.bunnyVideoId,
     status: "INITIALIZING" as BunnyVideoStatus,
     encodeProgress: null,

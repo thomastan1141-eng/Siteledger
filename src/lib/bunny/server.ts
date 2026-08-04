@@ -1,12 +1,8 @@
+import "server-only";
+
 import { createHash, createHmac, timingSafeEqual } from "crypto";
-import {
-  BUNNY_API_BASE,
-  BUNNY_PLAYER_BASE,
-  getBunnyApiKey,
-  getBunnyEmbedTokenKey,
-  getBunnyLibraryId,
-  getBunnyReadOnlyApiKey,
-} from "./config";
+import { BUNNY_API_BASE, BUNNY_PLAYER_BASE, BUNNY_TUS_ENDPOINT } from "./config";
+import { bunnyConfig } from "@/lib/server/bunny-config";
 import type { BunnyVideoStatus } from "@/lib/types";
 
 export type BunnyVideoDetails = {
@@ -24,23 +20,18 @@ export type BunnyVideoDetails = {
   title: string | null;
 };
 
-async function bunnyFetch(
-  path: string,
-  init?: RequestInit & { accessKey?: string },
-) {
-  const libraryId = getBunnyLibraryId();
-  const accessKey = init?.accessKey || getBunnyApiKey();
+async function bunnyFetch(path: string, init?: RequestInit) {
+  const libraryId = bunnyConfig.libraryId;
   const headers = {
-    AccessKey: accessKey,
+    AccessKey: bunnyConfig.apiKey,
     Accept: "application/json",
     ...(init?.headers || {}),
   };
-  const res = await fetch(`${BUNNY_API_BASE}/library/${libraryId}${path}`, {
+  return fetch(`${BUNNY_API_BASE}/library/${libraryId}${path}`, {
     method: init?.method,
     body: init?.body,
     headers,
   });
-  return res;
 }
 
 export async function createBunnyVideo(title: string): Promise<string> {
@@ -92,7 +83,7 @@ export async function getBunnyVideo(
     });
   }
   const data = (await res.json()) as Record<string, unknown>;
-  const libraryId = getBunnyLibraryId();
+  const libraryId = bunnyConfig.libraryId;
   const guid = String(data.guid || videoId);
   const thumbName = data.thumbnailFileName
     ? String(data.thumbnailFileName)
@@ -130,8 +121,8 @@ export async function getBunnyVideo(
 }
 
 export function createTusCredentials(videoId: string) {
-  const libraryId = getBunnyLibraryId();
-  const apiKey = getBunnyApiKey();
+  const libraryId = bunnyConfig.libraryId;
+  const apiKey = bunnyConfig.apiKey;
   const expirationTime = Math.floor(Date.now() / 1000) + 86400;
   const signatureSource = `${libraryId}${apiKey}${expirationTime}${videoId}`;
   const signature = createHash("sha256").update(signatureSource).digest("hex");
@@ -140,13 +131,13 @@ export function createTusCredentials(videoId: string) {
     videoId,
     expirationTime,
     signature,
-    tusEndpoint: "https://video.bunnycdn.com/tusupload",
+    tusEndpoint: BUNNY_TUS_ENDPOINT,
   };
 }
 
 export function createEmbedPlayback(videoId: string, ttlSeconds = 300) {
-  const libraryId = getBunnyLibraryId();
-  const key = getBunnyEmbedTokenKey();
+  const libraryId = bunnyConfig.libraryId;
+  const key = bunnyConfig.embedTokenKey;
   const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
   const token = createHash("sha256")
     .update(`${key}${videoId}${expires}`)
@@ -167,7 +158,7 @@ export function verifyBunnyWebhookSignature(input: {
   if (input.version !== "v1") return false;
   if (input.algorithm !== "hmac-sha256") return false;
 
-  const expected = createHmac("sha256", getBunnyReadOnlyApiKey())
+  const expected = createHmac("sha256", bunnyConfig.readOnlyApiKey)
     .update(input.rawBody)
     .digest("hex");
   const provided = input.signature.trim().toLowerCase();
@@ -181,7 +172,6 @@ export function mapBunnyWebhookStatus(
   status: number,
   current?: BunnyVideoStatus | null,
 ): BunnyVideoStatus | null {
-  // Captions/title generation should not demote READY.
   if ((status === 9 || status === 10) && current === "READY") return null;
 
   switch (status) {

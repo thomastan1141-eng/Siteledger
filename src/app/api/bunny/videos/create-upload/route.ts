@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  BUNNY_MAX_UPLOAD_BYTES,
-  getBunnyLibraryId,
-} from "@/lib/bunny/config";
+import { BUNNY_MAX_UPLOAD_BYTES } from "@/lib/bunny/config";
 import {
   createBunnyMediaRecord,
   findMediaByClientUploadId,
@@ -13,6 +10,7 @@ import {
   deleteBunnyVideo,
 } from "@/lib/bunny/server";
 import { authErrorResponse, verifyAuthenticatedRequest } from "@/lib/server/auth";
+import { bunnyConfig } from "@/lib/server/bunny-config";
 import {
   assertClientVisibleAllowed,
   assertProjectPermission,
@@ -141,7 +139,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         mediaId: media.id,
         videoId: tus.videoId,
-        libraryId: getBunnyLibraryId(),
+        libraryId: bunnyConfig.libraryId,
         expirationTime: tus.expirationTime,
         signature: tus.signature,
         tusEndpoint: tus.tusEndpoint,
