@@ -298,10 +298,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const current = getFirebaseAuth().currentUser;
         if (!current) return false;
         await current.reload();
-        // Force token refresh so email_verified claim updates for API routes.
-        await current.getIdToken(true);
         const latest = getFirebaseAuth().currentUser;
         const verified = Boolean(latest?.emailVerified);
+        // Only force a token refresh once we actually need the updated
+        // email_verified claim for API routes — not on every poll. Forcing
+        // getIdToken(true) on an unverified account every few seconds is
+        // what was tripping Firebase's abuse rate limiter (too-many-requests)
+        // and blocking legitimate resend attempts.
+        if (verified) {
+          await current.getIdToken(true);
+        }
         setUser((prev) => {
           if (
             prev?.uid === latest?.uid &&

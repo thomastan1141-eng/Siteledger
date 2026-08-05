@@ -24,7 +24,14 @@ export default function VerifyEmailPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const finishingRef = useRef(false);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const id = window.setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => window.clearTimeout(id);
+  }, [resendCooldown]);
 
   useEffect(() => {
     if (AUTH_BYPASS) {
@@ -56,11 +63,27 @@ export default function VerifyEmailPage() {
     if (AUTH_BYPASS || loading || !user) return;
 
     let cancelled = false;
+    let timeoutId: number | undefined;
+    // Backs off on every failed check (e.g. transient network hiccups or a
+    // Firebase abuse-rate-limit) instead of hammering the Identity Toolkit
+    // API every few seconds forever. Hammering reload()/getIdToken() on a
+    // fixed short interval — including on every tab focus — is what
+    // previously tripped auth/too-many-requests and then never recovered,
+    // because the loop kept retrying immediately and re-extending the block.
+    const MIN_DELAY_MS = 4000;
+    const MAX_DELAY_MS = 60000;
+    let delay = MIN_DELAY_MS;
+    let lastAttemptAt = 0;
+    const MIN_GAP_BETWEEN_ATTEMPTS_MS = 3000;
 
-    async function finishIfVerified() {
+    async function finishIfVerified(showErrors: boolean) {
       if (cancelled || finishingRef.current) return;
+      const now = Date.now();
+      if (now - lastAttemptAt < MIN_GAP_BETWEEN_ATTEMPTS_MS) return;
+      lastAttemptAt = now;
       try {
         const verified = await reloadVerified();
+        delay = MIN_DELAY_MS;
         if (!verified || cancelled) return;
 
         finishingRef.current = true;
@@ -72,27 +95,36 @@ export default function VerifyEmailPage() {
       } catch (err) {
         finishingRef.current = false;
         if (cancelled) return;
-        setError(
-          err instanceof Error
-            ? err.message
-            : "We could not finish setup. Please try again.",
-        );
-        setBusy(false);
+        // Silent background polls back off quietly; only surface an error
+        // for an explicit user action (the button click / manual retry).
+        delay = Math.min(delay * 2, MAX_DELAY_MS);
+        if (showErrors) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "We could not finish setup. Please try again.",
+          );
+          setBusy(false);
+        }
       }
     }
 
-    void finishIfVerified();
+    function scheduleNext() {
+      if (cancelled) return;
+      timeoutId = window.setTimeout(() => {
+        void finishIfVerified(false).finally(scheduleNext);
+      }, delay);
+    }
 
-    const intervalId = window.setInterval(() => {
-      void finishIfVerified();
-    }, 2500);
+    void finishIfVerified(false);
+    scheduleNext();
 
     function onFocus() {
-      void finishIfVerified();
+      void finishIfVerified(false);
     }
     function onVisibility() {
       if (document.visibilityState === "visible") {
-        void finishIfVerified();
+        void finishIfVerified(false);
       }
     }
 
@@ -101,7 +133,7 @@ export default function VerifyEmailPage() {
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      if (timeoutId) window.clearTimeout(timeoutId);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
@@ -166,13 +198,14 @@ export default function VerifyEmailPage() {
         <SiteButton
           type="button"
           variant="ghost"
-          disabled={busy}
+          disabled={busy || resendCooldown > 0}
           onClick={async () => {
             setBusy(true);
             setError("");
             try {
               await resendVerification();
-              setMessage("Verification email resent.");
+              setMessage("Verification email resent. Check your inbox (and spam folder).");
+              setResendCooldown(60);
             } catch (err) {
               setError(
                 err instanceof Error
@@ -184,7 +217,9 @@ export default function VerifyEmailPage() {
             }
           }}
         >
-          Resend verification email
+          {resendCooldown > 0
+            ? `Resend verification email (${resendCooldown}s)`
+            : "Resend verification email"}
         </SiteButton>
         <SiteButton
           type="button"
