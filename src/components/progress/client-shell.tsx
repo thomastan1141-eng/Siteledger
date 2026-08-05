@@ -6,6 +6,7 @@ import { Film, Images, LogOut, UserRound } from "lucide-react";
 import { PLATFORM_KICKER, PLATFORM_NAME } from "@/lib/constants";
 import { useAuth } from "@/lib/auth-context";
 import { AUTH_BYPASS } from "@/lib/demo";
+import { PageWidthProvider, usePageWidthMode } from "@/lib/page-width";
 import { SiteButton } from "./primitives";
 
 /** Client portal: media + account only. No Schedule/Journal/Purchases/Access. */
@@ -16,8 +17,17 @@ const NAV = [
 ];
 
 export function ProgressClientShell({ children }: { children: React.ReactNode }) {
+  return (
+    <PageWidthProvider>
+      <ClientShellChrome>{children}</ClientShellChrome>
+    </PageWidthProvider>
+  );
+}
+
+function ClientShellChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { profile, logout } = useAuth();
+  const widthMode = usePageWidthMode();
 
   return (
     <div className="site-app site-shell">
@@ -59,7 +69,7 @@ export function ProgressClientShell({ children }: { children: React.ReactNode })
         </div>
       </header>
 
-      <main className="site-main" data-width="content">
+      <main className="site-main" data-width={widthMode}>
         {children}
       </main>
 

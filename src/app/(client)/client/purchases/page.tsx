@@ -3,9 +3,11 @@
 import { SitePageHeader } from "@/components/progress/primitives";
 import { PurchasesPanel } from "@/components/progress/purchases-panel";
 import { useClientProject } from "@/lib/client-project";
+import { usePageWidth } from "@/lib/page-width";
 import { getProjectDisplayName } from "@/lib/utils";
 
 export default function ClientPurchasesPage() {
+  usePageWidth("data");
   const { project } = useClientProject();
 
   return (

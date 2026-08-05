@@ -15,6 +15,7 @@ import {
 import { PLATFORM_KICKER, PLATFORM_NAME } from "@/lib/constants";
 import { useAuth } from "@/lib/auth-context";
 import { AUTH_BYPASS } from "@/lib/demo";
+import { PageWidthProvider, usePageWidthMode } from "@/lib/page-width";
 import { SiteButton } from "./primitives";
 
 const NAV = [
@@ -30,8 +31,17 @@ const NAV = [
 const DOCK = NAV.slice(0, 4);
 
 export function ProgressStaffShell({ children }: { children: React.ReactNode }) {
+  return (
+    <PageWidthProvider>
+      <StaffShellChrome>{children}</StaffShellChrome>
+    </PageWidthProvider>
+  );
+}
+
+function StaffShellChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { profile, logout } = useAuth();
+  const widthMode = usePageWidthMode();
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
@@ -82,7 +92,7 @@ export function ProgressStaffShell({ children }: { children: React.ReactNode }) 
         </div>
       </header>
 
-      <main className="site-main" data-width="content">
+      <main className="site-main" data-width={widthMode}>
         {children}
       </main>
 

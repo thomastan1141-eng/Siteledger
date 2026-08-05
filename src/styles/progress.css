@@ -30,8 +30,11 @@
 
   --site-radius: 4px;
   --site-radius-lg: 12px;
-  --site-max: 1120px;
-  --site-max-wide: 1280px;
+  /* Width modes for .site-main[data-width]. "normal" is the default for
+     every page; pages opt into "wide"/"data"/"narrow" via usePageWidth(). */
+  --site-max-normal: 1280px;
+  --site-max-wide: 1440px;
+  --site-max-data: 1600px;
   --site-max-narrow: 720px;
 
   --font-site: var(--font-site-sans), "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -66,7 +69,7 @@
 }
 
 .site-topbar-inner {
-  max-width: var(--site-max-wide);
+  max-width: var(--site-max-normal);
   margin: 0 auto;
   padding: 14px 20px 0;
 }
@@ -135,7 +138,8 @@
 .site-main {
   flex: 1;
   width: 100%;
-  max-width: var(--site-max-wide);
+  min-width: 0;
+  max-width: var(--site-max-normal);
   margin: 0 auto;
   padding: 28px 20px 96px;
 }
@@ -144,8 +148,14 @@
   max-width: var(--site-max-narrow);
 }
 
-.site-main[data-width="content"] {
-  max-width: var(--site-max);
+.site-main[data-width="wide"] {
+  max-width: var(--site-max-wide);
+}
+
+.site-main[data-width="data"] {
+  max-width: var(--site-max-data);
+  padding-left: 24px;
+  padding-right: 24px;
 }
 
 .site-demo-banner {
@@ -2030,6 +2040,8 @@ a.site-chip {
 .site-purchases {
   display: grid;
   gap: 16px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .site-purchase-rate-row {
@@ -2528,32 +2540,32 @@ a.site-chip {
   font-size: 12px;
 }
 
+/*
+ * Purchases table width chain: the table itself keeps a wide min-width
+ * (1400/1500px, below) so columns never get crushed, but every ancestor in
+ * this chain gets min-width:0 + max-width:100% so that intrinsic content
+ * size can never inflate .site-purchases/.site-main and cause page-level
+ * horizontal scrolling. Only .purchase-table-scroll (overflow-x:auto) is
+ * allowed to scroll — it is the single scroll owner for this table.
+ */
+.purchase-table-full-width,
+.purchase-table-scroll,
 .site-purchase-table-wrap {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.purchase-table-scroll,
+.site-purchase-table-wrap {
   overflow-x: auto;
   overflow-y: visible;
+}
+
+.site-purchase-table-wrap {
   border: 1px solid var(--site-border);
   border-radius: 12px;
   background: var(--site-surface);
-}
-
-.purchase-table-full-width {
-  width: 100%;
-}
-
-.site-purchases[data-full-table="true"] .purchase-table-full-width {
-  position: relative;
-  left: 50%;
-  transform: translateX(-50%);
-  width: calc(100vw - 48px);
-  max-width: none;
-  box-sizing: border-box;
-}
-
-.purchase-table-scroll {
-  width: 100%;
-  overflow-x: auto;
-  overflow-y: visible;
 }
 
 .site-purchase-table {
@@ -2740,6 +2752,8 @@ a.site-chip {
 
 .site-purchase-desktop {
   display: block;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .site-purchase-mobile {
@@ -2857,30 +2871,14 @@ a.site-chip {
   cursor: pointer;
 }
 
+/* Below 1024px (tablets included) switch to the card layout so the
+   1400/1500px desktop table is never laid out on medium-width viewports. */
 @media (max-width: 1024px) {
-  .site-purchases[data-full-table="true"] .purchase-table-full-width {
-    width: calc(100vw - 40px);
-  }
-}
-
-@media (max-width: 900px) {
   .site-purchase-desktop {
     display: none;
   }
 
   .site-purchase-mobile {
     display: grid;
-  }
-
-  .site-purchases[data-full-table="true"] .purchase-table-full-width {
-    left: 0;
-    transform: none;
-    width: 100%;
-  }
-}
-
-@media (max-width: 480px) {
-  .site-purchases[data-full-table="true"] .purchase-table-full-width {
-    width: 100%;
   }
 }

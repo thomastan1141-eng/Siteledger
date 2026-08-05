@@ -33,6 +33,7 @@ import {
   reauthenticateWithCredential,
 } from "firebase/auth";
 import { useAuth } from "@/lib/auth-context";
+import { usePageWidth } from "@/lib/page-width";
 import { useWorkspace } from "@/lib/workspace-context";
 import { getFirebaseAuth } from "@/lib/firebase";
 import {
@@ -79,6 +80,9 @@ export default function ProjectDetailsPage() {
       ? initialTab
       : "overview",
   );
+  // Overview tab embeds the 12-week timeline + monthly calendar, so it gets
+  // the "wide" section width; other tabs (journal/media/settings) stay normal.
+  usePageWidth(tab === "overview" ? "wide" : "normal");
   const [manageStagesOpen, setManageStagesOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
@@ -377,7 +381,7 @@ export default function ProjectDetailsPage() {
                       gridTemplateColumns: "1.2fr auto auto",
                       gap: 12,
                       alignItems: "center",
-                      padding: "12px 0",
+                      padding: "7px 0",
                       borderBottom: "1px solid var(--site-border)",
                     }}
                   >

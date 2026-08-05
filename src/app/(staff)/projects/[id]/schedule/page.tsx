@@ -12,6 +12,7 @@ import {
 } from "@/components/progress/primitives";
 import { WeekTimeline } from "@/components/progress/week-timeline";
 import { useAuth } from "@/lib/auth-context";
+import { usePageWidth } from "@/lib/page-width";
 import { useWorkspace } from "@/lib/workspace-context";
 import { getProject } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
@@ -22,6 +23,7 @@ import { getProjectDisplayName } from "@/lib/utils";
  * Kept for deep links / bookmarks. Primary schedule entry is Project Overview.
  */
 export default function SchedulePage() {
+  usePageWidth("wide");
   const { id } = useParams<{ id: string }>();
   const { profile } = useAuth();
   const { workspaceId } = useWorkspace();

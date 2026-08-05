@@ -9,11 +9,13 @@ import {
 import { PurchasesPanel } from "@/components/progress/purchases-panel";
 import { SiteSpinner } from "@/components/progress/primitives";
 import { useAuth } from "@/lib/auth-context";
+import { usePageWidth } from "@/lib/page-width";
 import { useWorkspace } from "@/lib/workspace-context";
 import { getProject } from "@/lib/services/projects";
 import type { Project } from "@/lib/types";
 
 export default function ProjectPurchasesPage() {
+  usePageWidth("data");
   const { id } = useParams<{ id: string }>();
   const { profile } = useAuth();
   const { workspaceId } = useWorkspace();
