@@ -632,6 +632,39 @@
   }
 }
 
+/*
+ * Journal photo gallery density control (ProgressTimeline's Small/Medium/
+ * Large toggle). Mobile/tablet counts stay fixed regardless of the chosen
+ * size — only the desktop column count (and therefore thumbnail size)
+ * changes. Doesn't affect Media library / Client gallery / other callers
+ * of ProgressMediaGrid, which never pass a `size` prop.
+ */
+.site-media-grid[data-size] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+@media (min-width: 640px) {
+  .site-media-grid[data-size] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+}
+
+@media (min-width: 960px) {
+  .site-media-grid[data-size="small"] {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+
+  .site-media-grid[data-size="medium"] {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .site-media-grid[data-size="large"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .site-media-tile {
   position: relative;
   aspect-ratio: 1;
@@ -685,6 +718,26 @@
   display: flex;
   flex-direction: column;
   gap: 28px;
+}
+
+.site-timeline-size-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: -8px 0 4px;
+}
+
+.site-timeline-size-toggle .site-chip {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+.site-timeline-size-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--site-text-secondary);
+  margin-right: 2px;
 }
 
 .site-timeline-item {
@@ -2107,75 +2160,122 @@ a.site-chip {
   font-size: 16px;
 }
 
+/*
+ * Column widths are percentages of the table (table-layout: fixed) so the
+ * table fills width: 100% of its container instead of forcing a fixed
+ * 1400/1500px min-width. Each <col> also carries a small px min-width floor
+ * so inputs/selects stay usable; if the container is narrower than the sum
+ * of those floors (roughly the 1025-1279px desktop range), the table grows
+ * past 100% and .purchase-table-scroll scrolls internally — the page itself
+ * never does. The "is-lighting" variant adds the Specifications column; the
+ * percentages below are the "is-lighting" (13-column) allocation, rescaled
+ * for "is-simple" (12 columns, no Specifications).
+ */
 .site-purchase-table-simple {
-  min-width: 1500px;
   table-layout: fixed;
   width: 100%;
 }
 
-.site-purchase-table-simple.is-simple {
-  min-width: 1400px;
-}
-
 .site-purchase-table-simple .col-photo {
-  width: 72px;
+  width: 5%;
+  min-width: 64px;
 }
 
 .site-purchase-table-simple.is-lighting .col-item {
-  width: 155px;
+  width: 10%;
+  min-width: 84px;
 }
 
 .site-purchase-table-simple.is-simple .col-item {
-  width: 180px;
+  width: 11%;
+  min-width: 84px;
 }
 
 .site-purchase-table-simple.is-lighting .col-desc {
-  width: 200px;
+  width: 13%;
+  min-width: 120px;
 }
 
 .site-purchase-table-simple.is-simple .col-desc {
-  width: 220px;
+  width: 14%;
+  min-width: 120px;
 }
 
 .site-purchase-table-simple.is-lighting .col-location {
-  width: 300px;
+  width: 11%;
+  min-width: 96px;
 }
 
 .site-purchase-table-simple.is-simple .col-location {
-  width: 320px;
+  width: 12%;
+  min-width: 96px;
 }
 
 .site-purchase-table-simple .col-specs {
-  width: 150px;
+  width: 10%;
+  min-width: 96px;
 }
 
-.site-purchase-table-simple .col-by {
-  width: 120px;
+.site-purchase-table-simple.is-lighting .col-by {
+  width: 8%;
+  min-width: 68px;
 }
 
-.site-purchase-table-simple .col-qty {
-  width: 88px;
+.site-purchase-table-simple.is-simple .col-by {
+  width: 9%;
+  min-width: 68px;
 }
 
-.site-purchase-table-simple .col-unit {
-  width: 125px;
+.site-purchase-table-simple.is-lighting .col-qty {
+  width: 6%;
+  min-width: 60px;
 }
 
-.site-purchase-table-simple .col-rmb,
-.site-purchase-table-simple .col-sgd {
-  width: 115px;
+.site-purchase-table-simple.is-simple .col-qty {
+  width: 7%;
+  min-width: 60px;
 }
 
-.site-purchase-table-simple .col-status {
-  width: 135px;
+.site-purchase-table-simple.is-lighting .col-unit {
+  width: 8%;
+  min-width: 68px;
+}
+
+.site-purchase-table-simple.is-simple .col-unit {
+  width: 9%;
+  min-width: 68px;
+}
+
+.site-purchase-table-simple.is-lighting .col-rmb,
+.site-purchase-table-simple.is-lighting .col-sgd {
+  width: 7%;
+  min-width: 60px;
+}
+
+.site-purchase-table-simple.is-simple .col-rmb,
+.site-purchase-table-simple.is-simple .col-sgd {
+  width: 8%;
+  min-width: 60px;
+}
+
+.site-purchase-table-simple.is-lighting .col-status {
+  width: 9%;
+  min-width: 84px;
+}
+
+.site-purchase-table-simple.is-simple .col-status {
+  width: 10%;
+  min-width: 84px;
 }
 
 .site-purchase-table-simple .col-action {
-  width: 200px;
+  width: 3%;
+  min-width: 84px;
 }
 
 .site-purchase-table-simple .col-more {
-  width: 56px;
+  width: 3%;
+  min-width: 36px;
 }
 
 .site-purchase-table-simple th:nth-child(2),
@@ -2226,15 +2326,15 @@ a.site-chip {
 }
 
 .site-purchase-qty-cell {
-  min-width: 80px;
+  min-width: 0;
 }
 
 .site-purchase-qty {
-  width: 68px !important;
-  min-width: 64px !important;
-  max-width: 72px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 64px !important;
   box-sizing: border-box;
-  padding: 6px 8px !important;
+  padding: 4px 6px !important;
   text-align: right;
   -moz-appearance: textfield;
 }
@@ -2246,20 +2346,25 @@ a.site-chip {
 }
 
 .site-purchase-price {
-  width: 108px !important;
-  max-width: 118px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 76px !important;
+  box-sizing: border-box;
   text-align: right;
 }
 
 .site-purchase-status-select {
-  min-width: 128px !important;
-  max-width: 148px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100px !important;
+  box-sizing: border-box;
 }
 
 .site-purchase-action-input {
-  min-width: 160px !important;
-  max-width: 220px !important;
   width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .site-purchase-action-wrap {
@@ -2479,11 +2584,6 @@ a.site-chip {
   margin-top: 10px;
 }
 
-.site-purchase-table th,
-.site-purchase-table td {
-  padding: 12px 14px;
-}
-
 .site-purchase-summary {
   display: none;
 }
@@ -2556,12 +2656,14 @@ a.site-chip {
 }
 
 /*
- * Purchases table width chain: the table itself keeps a wide min-width
- * (1400/1500px, below) so columns never get crushed, but every ancestor in
- * this chain gets min-width:0 + max-width:100% so that intrinsic content
- * size can never inflate .site-purchases/.site-main and cause page-level
- * horizontal scrolling. Only .purchase-table-scroll (overflow-x:auto) is
- * allowed to scroll — it is the single scroll owner for this table.
+ * Purchases table width chain: the table itself is width:100% with
+ * percentage columns (see .site-purchase-table-simple above) plus small
+ * per-column min-width floors, so it only exceeds its container — and
+ * scrolls — when those floors genuinely don't fit. Every ancestor here
+ * gets min-width:0 + max-width:100% so intrinsic content size can never
+ * inflate .site-purchases/.site-main and cause page-level horizontal
+ * scrolling. Only .purchase-table-scroll (overflow-x:auto) is allowed to
+ * scroll — it is the single scroll owner for this table.
  */
 .purchase-table-full-width,
 .purchase-table-scroll,
@@ -2589,29 +2691,23 @@ a.site-chip {
   font-size: 13px;
 }
 
-.site-purchase-table.site-purchase-table-simple {
-  min-width: 1500px;
-}
-
-.site-purchase-table.site-purchase-table-simple.is-simple {
-  min-width: 1400px;
-}
-
 .site-purchase-table th,
 .site-purchase-table td {
-  padding: 10px 12px;
+  padding: 7px 8px;
   border-bottom: 1px solid var(--site-border);
   vertical-align: top;
   text-align: left;
+  overflow: hidden;
 }
 
 .site-purchase-table th {
   font-size: 11px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--site-text-light);
   background: var(--site-surface-soft);
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.25;
 }
 
 .site-purchase-thumb {
@@ -2887,7 +2983,7 @@ a.site-chip {
 }
 
 /* Below 1024px (tablets included) switch to the card layout so the
-   1400/1500px desktop table is never laid out on medium-width viewports. */
+   dense desktop table is never laid out on medium-width viewports. */
 @media (max-width: 1024px) {
   .site-purchase-desktop {
     display: none;

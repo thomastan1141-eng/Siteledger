@@ -52,6 +52,8 @@ function processingLabel(item: MediaItem) {
   return "Processing video…";
 }
 
+export type MediaGridSize = "small" | "medium" | "large";
+
 export function ProgressMediaGrid({
   items,
   allowDownload = false,
@@ -59,6 +61,7 @@ export function ProgressMediaGrid({
   canDelete = false,
   canManageVisibility = false,
   onChanged,
+  size,
 }: {
   items: MediaItem[];
   allowDownload?: boolean;
@@ -66,6 +69,9 @@ export function ProgressMediaGrid({
   canDelete?: boolean;
   canManageVisibility?: boolean;
   onChanged?: () => void;
+  /** Thumbnail density override (Small/Medium/Large). Omit to keep the
+   * existing fixed grid used by Media library, Client gallery, etc. */
+  size?: MediaGridSize;
 }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const active = activeIndex !== null ? items[activeIndex] : null;
@@ -209,7 +215,7 @@ export function ProgressMediaGrid({
 
   return (
     <>
-      <div className="site-media-grid">
+      <div className="site-media-grid" data-size={size}>
         {items.map((item, index) => {
           const bunny = isBunnyVideo(item);
           const ready = !bunny || isBunnyReady(item);
@@ -291,6 +297,7 @@ export function ProgressMediaGrid({
                 <img
                   src={item.downloadUrl}
                   alt={item.caption || item.fileName}
+                  loading="lazy"
                 />
               ) : bunny ? (
                 <BunnyThumbnail

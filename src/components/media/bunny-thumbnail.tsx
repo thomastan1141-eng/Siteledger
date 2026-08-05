@@ -49,6 +49,7 @@ export function BunnyThumbnail({
       alt={alt}
       className={className}
       style={style}
+      loading="lazy"
       referrerPolicy="strict-origin-when-cross-origin"
       onError={() => setFailed(true)}
     />

@@ -1,9 +1,24 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { DailyUpdate, MediaItem } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
-import { ProgressMediaGrid } from "./media-grid";
+import { ProgressMediaGrid, type MediaGridSize } from "./media-grid";
 import { SiteEmpty, SitePill } from "./primitives";
+
+const PHOTO_SIZE_KEY = "siteledger.journalPhotoSize";
+const PHOTO_SIZES: MediaGridSize[] = ["small", "medium", "large"];
+const PHOTO_SIZE_LABELS: Record<MediaGridSize, string> = {
+  small: "Small",
+  medium: "Medium",
+  large: "Large",
+};
+
+function readStoredPhotoSize(): MediaGridSize {
+  if (typeof window === "undefined") return "small";
+  const stored = window.localStorage.getItem(PHOTO_SIZE_KEY);
+  return stored === "medium" || stored === "large" ? stored : "small";
+}
 
 export function ProgressTimeline({
   groups,
@@ -14,6 +29,14 @@ export function ProgressTimeline({
   mediaByUpdate: Record<string, MediaItem[]>;
   allowDownload?: boolean;
 }) {
+  const [photoSize, setPhotoSize] = useState<MediaGridSize>(() =>
+    readStoredPhotoSize(),
+  );
+
+  useEffect(() => {
+    window.localStorage.setItem(PHOTO_SIZE_KEY, photoSize);
+  }, [photoSize]);
+
   if (!groups.length) {
     return (
       <SiteEmpty
@@ -25,6 +48,20 @@ export function ProgressTimeline({
 
   return (
     <div className="site-timeline">
+      <div className="site-timeline-size-toggle" role="group" aria-label="Photo thumbnail size">
+        <span className="site-timeline-size-label">Photo size</span>
+        {PHOTO_SIZES.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className="site-chip"
+            data-active={photoSize === s}
+            onClick={() => setPhotoSize(s)}
+          >
+            {PHOTO_SIZE_LABELS[s]}
+          </button>
+        ))}
+      </div>
       {groups.map(({ date, items }) => {
         const work = Array.from(
           new Set(items.flatMap((u) => [...u.workItems, ...u.customActivities])),
@@ -73,7 +110,11 @@ export function ProgressTimeline({
                 </p>
               ))}
 
-              <ProgressMediaGrid items={media} allowDownload={allowDownload} />
+              <ProgressMediaGrid
+                items={media}
+                allowDownload={allowDownload}
+                size={photoSize}
+              />
             </div>
           </article>
         );
