@@ -280,10 +280,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async resendVerification() {
         const current = getFirebaseAuth().currentUser;
         if (!current) throw new Error("Please sign in again.");
-        await sendEmailVerification(
-          current,
-          verificationActionCodeSettings(),
-        );
+        try {
+          await sendEmailVerification(
+            current,
+            verificationActionCodeSettings(),
+          );
+        } catch (err) {
+          throw new Error(
+            friendlyAuthError(
+              err,
+              "We could not resend the verification email. Please try again.",
+            ),
+          );
+        }
       },
       async reloadVerified() {
         const current = getFirebaseAuth().currentUser;
