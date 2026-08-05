@@ -25,13 +25,41 @@ export default function VerifyEmailPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  // Lazily read at mount so a failed initial send (recorded by signup())
+  // never gets to render the "we sent a link" copy, even for one frame.
+  const [sendConfirmed, setSendConfirmed] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return !window.sessionStorage.getItem("siteledger.verificationSendFailed");
+  });
   const finishingRef = useRef(false);
+  const retriedSendRef = useRef(false);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
     const id = window.setTimeout(() => setResendCooldown((s) => s - 1), 1000);
     return () => window.clearTimeout(id);
   }, [resendCooldown]);
+
+  // The initial verification email sent during signup may have failed (e.g.
+  // a domain-authorization issue). Never claim "we sent a link" in that case
+  // — instead try once more and only confirm success if it actually resolves.
+  useEffect(() => {
+    if (loading || !user || sendConfirmed || retriedSendRef.current) return;
+    retriedSendRef.current = true;
+    void resendVerification()
+      .then(() => {
+        window.sessionStorage.removeItem("siteledger.verificationSendFailed");
+        setSendConfirmed(true);
+        setResendCooldown(60);
+      })
+      .catch((err) => {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "We could not send the verification email automatically. Please use the resend button below.",
+        );
+      });
+  }, [loading, user, resendVerification, sendConfirmed]);
 
   useEffect(() => {
     if (AUTH_BYPASS) {
@@ -175,7 +203,11 @@ export default function VerifyEmailPage() {
   return (
     <AuthShell
       title="Check your inbox"
-      description="We sent a verification link to your email address. After you verify, this page will continue automatically."
+      description={
+        sendConfirmed
+          ? "We sent a verification link to your email address. After you verify, this page will continue automatically."
+          : "We're sending your verification link now. This page will confirm once it's on its way."
+      }
     >
       <div style={{ display: "grid", gap: 12 }}>
         <p style={{ fontSize: 14, color: "var(--site-text-secondary)" }}>

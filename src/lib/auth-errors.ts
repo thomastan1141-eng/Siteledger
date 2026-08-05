@@ -27,6 +27,8 @@ export function friendlyAuthError(err: unknown, fallback: string): string {
       return "Please enter your password.";
     case "auth/requires-recent-login":
       return "Please sign in again to continue.";
+    case "auth/unauthorized-continue-uri":
+      return "We could not send the verification email due to a domain configuration issue. Please try the resend button, or contact support.";
     default:
       if (err instanceof Error && err.message && !err.message.includes("Firebase")) {
         return err.message;

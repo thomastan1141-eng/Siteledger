@@ -86,6 +86,42 @@ function verificationActionCodeSettings() {
   };
 }
 
+function errorCode(err: unknown): string {
+  return typeof err === "object" && err && "code" in err
+    ? String((err as { code?: string }).code || "")
+    : "";
+}
+
+const VERIFICATION_SEND_FAILED_KEY = "siteledger.verificationSendFailed";
+
+/**
+ * Sends the verification email, falling back to Firebase's default action
+ * (no custom continueUrl) if the app's own origin is not on the project's
+ * Auth "Authorized domains" allowlist (auth/unauthorized-continue-uri).
+ * That misconfiguration previously caused every production signup to fail
+ * to send a verification email while createUserWithEmailAndPassword still
+ * "succeeded" — see docs/firebase-remediation-roadmap.md.
+ */
+async function sendVerificationEmailWithFallback(
+  user: User,
+  stage: "signup" | "resend",
+): Promise<void> {
+  try {
+    await sendEmailVerification(user, verificationActionCodeSettings());
+    console.info(`[auth:${stage}] verification email sent (custom continueUrl)`);
+    return;
+  } catch (err) {
+    const code = errorCode(err);
+    console.error(`[auth:${stage}] send_verification failed code=${code || "unknown"}`);
+    if (code !== "auth/unauthorized-continue-uri") throw err;
+  }
+  // Custom continueUrl's origin isn't authorized in Firebase Auth settings.
+  // Retry with Firebase's default action handler so the user still gets an
+  // email, instead of silently failing.
+  await sendEmailVerification(user);
+  console.info(`[auth:${stage}] verification email sent (default action, fallback)`);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<AppUser | null>(
@@ -205,37 +241,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!isFirebaseConfigured) {
           throw new Error("Firebase is not configured. Add .env.local first.");
         }
+
+        // Stage 1: create the Firebase Auth account. Any failure here means
+        // no account exists, so it's safe to surface a fatal error.
+        let cred: { user: User };
         try {
           const auth = getFirebaseAuth();
           await setPersistence(auth, browserSessionPersistence);
           setSessionMode("session");
-          const cred = await createUserWithEmailAndPassword(
+          cred = await createUserWithEmailAndPassword(
             auth,
             input.email.trim(),
             input.password,
           );
-          if (input.displayName?.trim()) {
-            await updateProfile(cred.user, {
-              displayName: input.displayName.trim(),
-            });
-          }
-          await sendEmailVerification(
-            cred.user,
-            verificationActionCodeSettings(),
-          );
-          if (typeof window !== "undefined") {
-            window.sessionStorage.setItem(
-              "siteledger.pendingSignup",
-              JSON.stringify({
-                studioName: input.studioName?.trim() || "",
-                displayName: input.displayName?.trim() || "",
-              }),
-            );
-          }
-          setUser(cred.user);
-          setProfile(null);
-          return cred.user;
         } catch (err) {
+          console.error(`[auth:signup] create_account failed code=${errorCode(err) || "unknown"}`);
           throw new Error(
             friendlyAuthError(
               err,
@@ -243,6 +263,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             ),
           );
         }
+
+        // Stage 2: cosmetic profile update. Non-fatal — the account already
+        // exists, so we log and continue rather than fail the whole signup.
+        if (input.displayName?.trim()) {
+          try {
+            await updateProfile(cred.user, {
+              displayName: input.displayName.trim(),
+            });
+          } catch (err) {
+            console.error(`[auth:signup] update_display_name failed code=${errorCode(err) || "unknown"}`);
+          }
+        }
+
+        // Stage 3: send the verification email. The account already exists
+        // at this point, so a failure here must NOT be reported as "account
+        // creation failed" (that previously hid the real cause). Instead we
+        // record that the send failed so /verify-email can show an accurate
+        // state instead of falsely claiming an email was sent.
+        if (typeof window !== "undefined") {
+          window.sessionStorage.removeItem(VERIFICATION_SEND_FAILED_KEY);
+        }
+        try {
+          await sendVerificationEmailWithFallback(cred.user, "signup");
+        } catch (err) {
+          const code = errorCode(err) || "unknown";
+          console.error(`[auth:signup] send_verification failed permanently code=${code}`);
+          if (typeof window !== "undefined") {
+            window.sessionStorage.setItem(VERIFICATION_SEND_FAILED_KEY, code);
+          }
+        }
+
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem(
+            "siteledger.pendingSignup",
+            JSON.stringify({
+              studioName: input.studioName?.trim() || "",
+              displayName: input.displayName?.trim() || "",
+            }),
+          );
+        }
+        setUser(cred.user);
+        setProfile(null);
+        return cred.user;
       },
       async logout() {
         if (AUTH_BYPASS) {
@@ -281,10 +344,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const current = getFirebaseAuth().currentUser;
         if (!current) throw new Error("Please sign in again.");
         try {
-          await sendEmailVerification(
-            current,
-            verificationActionCodeSettings(),
-          );
+          await sendVerificationEmailWithFallback(current, "resend");
+          if (typeof window !== "undefined") {
+            window.sessionStorage.removeItem(VERIFICATION_SEND_FAILED_KEY);
+          }
         } catch (err) {
           throw new Error(
             friendlyAuthError(
