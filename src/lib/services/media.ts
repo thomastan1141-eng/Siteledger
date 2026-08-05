@@ -18,6 +18,7 @@ import {
 import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { AUTH_BYPASS, DEMO_MEDIA } from "../demo";
 import { mediaPath, requireTenantId, storageMediaPath } from "../paths";
+import { sanitizeForFirestore } from "../sanitize";
 import { isImageFile, isVideoFile, todayKey } from "../utils";
 import type { MediaItem, MediaType, MediaVisibility } from "../types";
 
@@ -156,7 +157,7 @@ export async function createMediaRecord(
   };
   const refDoc = await addDoc(
     collection(getFirebaseDb(), mediaPath(projectId, workspaceId)),
-    data,
+    sanitizeForFirestore(data),
   );
   return { id: refDoc.id, ...data };
 }

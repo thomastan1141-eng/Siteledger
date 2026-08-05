@@ -218,9 +218,11 @@ export function PurchasesPanel({
     }
     flash("saving");
     try {
-      const updated = await updateProject(project.id, {
-        purchaseSettings: { rmbToSgdRate: nextRate },
-      });
+      const updated = await updateProject(
+        project.id,
+        { purchaseSettings: { rmbToSgdRate: nextRate } },
+        purchaseWs,
+      );
       onProjectUpdated?.(updated);
       await recalculatePurchaseTotals(project.id, nextRate, profile, purchaseWs);
       setRateDirty(false);

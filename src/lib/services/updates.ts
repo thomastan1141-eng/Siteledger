@@ -12,6 +12,7 @@ import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_UPDATES } from "../demo";
 import { requireTenantId, updatesPath } from "../paths";
+import { sanitizeForFirestore } from "../sanitize";
 import { todayKey } from "../utils";
 import {
   appendDemoMedia,
@@ -205,7 +206,6 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
     });
 
     const media = await createMediaRecord(input.projectId, {
-      updateId: undefined,
       type: uploaded.type,
       provider: "FIREBASE_STORAGE",
       workspaceId,
@@ -249,7 +249,7 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
 
   const ref = await addDoc(
     collection(getFirebaseDb(), updatesPath(input.projectId, workspaceId)),
-    updateData,
+    sanitizeForFirestore(updateData),
   );
 
   // Link media back to update

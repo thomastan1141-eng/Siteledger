@@ -38,6 +38,7 @@ export function Overview3DPanel({
 
   const images = project.images3d || [];
   const selectedId = project.overview3dImageId || images[0]?.id;
+  const workspaceId = project.workspaceId || project.companyId;
 
   useEffect(() => {
     setLink(project.tour3dUrl || "");
@@ -55,7 +56,7 @@ export function Overview3DPanel({
     setError("");
     setMessage("");
     try {
-      const next = await saveTour3dLink(project.id, link, label);
+      const next = await saveTour3dLink(project.id, link, label, workspaceId);
       onUpdated?.(next);
       setEditingLink(false);
       setMessage("3D link saved.");
@@ -83,6 +84,7 @@ export function Overview3DPanel({
         imagesOnly,
         (fileName, pct) =>
           setProgress((prev) => ({ ...prev, [fileName]: pct })),
+        workspaceId,
       );
       onUpdated?.(next);
       setMessage(`${imagesOnly.length} 3D image(s) uploaded.`);
@@ -97,7 +99,7 @@ export function Overview3DPanel({
   async function onSelectImage(imageId: string) {
     setError("");
     try {
-      const next = await selectOverview3dImage(project.id, imageId);
+      const next = await selectOverview3dImage(project.id, imageId, workspaceId);
       onUpdated?.(next);
       setMessage("Overview image updated.");
     } catch (err) {
@@ -263,20 +265,40 @@ export function Overview3DPanel({
                         tabIndex={0}
                         onClick={async (e) => {
                           e.stopPropagation();
-                          const next = await removeProject3dImage(
-                            project.id,
-                            image.id,
-                          );
-                          onUpdated?.(next);
+                          setError("");
+                          try {
+                            const next = await removeProject3dImage(
+                              project.id,
+                              image.id,
+                              workspaceId,
+                            );
+                            onUpdated?.(next);
+                          } catch (err) {
+                            setError(
+                              err instanceof Error
+                                ? err.message
+                                : "Failed to remove image",
+                            );
+                          }
                         }}
                         onKeyDown={async (e) => {
                           if (e.key !== "Enter" && e.key !== " ") return;
                           e.stopPropagation();
-                          const next = await removeProject3dImage(
-                            project.id,
-                            image.id,
-                          );
-                          onUpdated?.(next);
+                          setError("");
+                          try {
+                            const next = await removeProject3dImage(
+                              project.id,
+                              image.id,
+                              workspaceId,
+                            );
+                            onUpdated?.(next);
+                          } catch (err) {
+                            setError(
+                              err instanceof Error
+                                ? err.message
+                                : "Failed to remove image",
+                            );
+                          }
                         }}
                         aria-label={`Remove ${image.fileName}`}
                       >
