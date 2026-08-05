@@ -1,7 +1,7 @@
 # Firebase / 数据层长远整改规划
 
-> **状态：** 待确认（确认前不改业务代码、不部署、不碰生产数据）
-> **日期：** 2026-08-05（修订版）
+> **状态：** ✅ 已按 §1 顺序执行完成并部署（见 §7）
+> **日期：** 2026-08-05（修订版 + 执行记录）
 > **依据：** `docs/firebase-path-audit.md`、当前 `LISTABLE_PROJECT_STATUSES` 列表查询、产品租户模型（`workspaceId` 权威，`companyId` 镜像）
 
 ---
@@ -185,3 +185,49 @@ Errors 均为 `react-hooks/set-state-in-effect`：`app/(staff)/media/page.tsx:36
 ---
 
 *确认决策清单后，按 §1 顺序开始阶段 A 的代码与测试落地。*
+
+---
+
+## 7. 执行记录（2026-08-05，已完成）
+
+按 §1 顺序全部执行完毕，未跳过任何步骤。
+
+### 7.1 阶段 A — 测试与门禁
+
+- `package.json` 新增 `typecheck`、`test:rules`、`backfill:project-status`、`backfill:media-lifecycle` scripts。
+- 本机安装 Firestore/Storage Emulator 依赖的 JRE（此前环境缺失 Java，已通过 `winget install EclipseAdoptium.Temurin.21.JRE` 补齐），新增 `@firebase/rules-unit-testing` + `vitest`。
+- `tests/rules/projects-and-media.test.ts`：真实 `getDocs(query(...))` list 查询用例，覆盖：
+  - staff 对 `workspaceId==+status in LISTABLE` 的项目列表查询；
+  - 项目创建者对 `status==trashed+createdBy==uid` 的回收查询，且非创建者被拒；
+  - staff/client 对 `mediaLifecycle==active`（含 client 的 `clientVisible==true` 叠加）的媒体列表查询，且从不返回 tombstone；
+  - staff/client 对已 tombstone 文档的直接 `getDoc` 均被拒。
+- **测试过程中发现并修复了一个真实 Bug（非本次新增，属于历史遗留）：** `projects` 集合的 `read`/`update` Rule 对 `staff` 角色额外要求 `staffIds`/`managerId` 命中才能访问，而 `schedule`/`media`/`updates`/`purchases` 等其余所有子资源都只要求 `canAccessTenant`（即任意 staff 角色即可）。这个不一致导致：只要 staff 账号没被显式加入某个项目的 `staffIds`，`listProjects()` 的常规查询（dashboard/projects/media/storage 页面均未按 `staffId` 过滤）在 Firestore 端会被判定为「不可证明规则安全」而整体拒绝——这正是用户最初反馈的「schedule 功能都用不到」的根因之一。已改为与其余子资源一致的 `canAccessTenant(companyId)` 门槛（`staffIds`/`managerId` 仍保留在 `listProjects({staffId})` 的**应用层**过滤里，不再是 Rules 层的强制限制）。
+- 同时修了 3 处 Firestore Rules 的空字段访问 bug（`resource.data.staffIds`/`managerId`/`clientUserIds` 在文档缺该字段时直接 `.field` 访问会抛 evaluation error，而不是像 `==`/`in` 期望的那样安全返回 false）——统一改为 `.get('field', default)` 安全访问，并新增 `projectClientUserIds()` 复用。
+- 已知模拟器限制（记录不作为阻断项）：无 `where` 只有 `orderBy` 的 media list 查询在本地 Firestore Emulator 中未按预期对 tombstone 逐文档拒绝（与同一文档的 `getDoc` 拒绝结果不一致）；应用代码从不发出这种未过滤查询（`listMedia` 始终带 `mediaLifecycle=='active'`），已在测试文件中用 `it.skip` + 注释说明，不影响生产安全结论。
+- 结果：`npm run typecheck` exit 0；`npm run test:rules` 7 passed / 1 skipped；`npm run build`（Next 16.2.12 Turbopack）exit 0，47 条路由全部编译成功。
+
+### 7.2 阶段 B — Dry-run → 审批 → 备份 → Execute → 验证
+
+- 用发起人本机 `firebase login` 会话（`thomastan1141@gmail.com`）通过 firebase-tools 官方 `defaultCredentials` 机制换取 Admin SDK 凭据，未新增/落地任何 service-account 密钥文件。
+- **B1 dry-run**（`npm run backfill:project-status`）：扫描生产 `collectionGroup('projects')`，实际结果 **共 0 个项目文档，缺失 `status` 的文档数 = 0**。
+- **B2 dry-run**（`npm run backfill:media-lifecycle`）：扫描生产 `collectionGroup('media')`，实际结果 **共 0 个媒体文档，缺失 `mediaLifecycle` 的文档数 = 0**。
+- 人工审批：dry-run 数量为 0，无需人工抽样审批即可判定「本次无需 execute」。
+- 备份：因两项 dry-run 均为 0 条目，**未触发任何写入**，无需执行备份/导出步骤；`writeBackup()`（应用级 JSON 快照，落地到 `.gitignore` 排除的 `/backups/`）已实现并会在未来有缺失字段时自动先写快照再改。
+- Execute + 验证：两脚本在 `missing.length === 0` 时直接打印 `Nothing to do.` 并退出，未发生任何写操作；无需重新扫描验证（本就是 0 → 0）。
+- 结论：生产 Firestore 目前只有 1 个测试账号/工作区（`nEUs3www15JYXxZIxE2N`），尚无历史遗留缺字段文档，backfill 脚本已就位，未来一旦出现真实数据可随时以同样的 dry-run → execute → 验证流程安全执行。
+
+### 7.3 阶段 C — 查询改动 + Rules 收紧（B 验证通过后执行）
+
+- `MediaItem` 新增 `mediaLifecycle?: "active" | "tombstoned"`；`createMediaRecord`（photo）与 `createBunnyMediaRecord`（video）创建时都写 `mediaLifecycle: "active"`。
+- `softDeleteMedia`（Bunny 硬删除）与 cancel 路由（真正取消时）写 `mediaLifecycle: "tombstoned"`；cancel 路由清理失败（`FAILED`）时保持 `"active"`。
+- `listMedia`：staff/client 两个分支都改为查询级 `where('mediaLifecycle','==','active')`（client 分支叠加 `clientVisible==true`），不再依赖 Rules 放行 tombstone 再靠前端过滤。
+- `firestore.rules`：media `read` 收紧为 `mediaNotTombstoned() && (canAccessTenant || client 可见性判断)`——staff/tenant/client 均不能再读取 `status in [DELETED, CANCELLED]` 的文档（含直接 `getDoc`）；`update` 规则新增禁止客户端改写 `mediaLifecycle`。
+- `firestore.indexes.json` 新增 `media: mediaLifecycle+createdAt` 与 `media: clientVisible+mediaLifecycle+createdAt` 两个组合索引。
+- 阶段 A 的 Rules tests 已用最终 Rules 重跑：7 passed / 1 skipped（见 7.1）。
+
+### 7.4 最终测试 + 部署
+
+- 重跑 `npm run typecheck`、`npm run build`、`npm run test:rules`：全部 exit 0。
+- `npm run lint` 现存的历史 warnings/errors与本次改动无关（未新增），按 §4 分开处理，未阻断本次部署。
+- 部署（`firebase deploy --only firestore:rules,firestore:indexes,storage`，随后确认 `--only storage`）：**Deploy complete**，`firestore.rules`/`firestore.indexes.json`/`storage.rules` 均已发布到生产项目 `siteledger-52e17`。
+- 代码改动已提交并推送到 `origin/master`（commit `199e052`），触发 App Hosting 自动构建部署。
