@@ -264,6 +264,13 @@ export default function ProjectDetailsPage() {
             </div>
           </div>
 
+          {/* 3D view */}
+          <Overview3DPanel
+            project={project}
+            editable
+            onUpdated={setProject}
+          />
+
           {/* 4. Project schedule — Timeline then Monthly calendar */}
           <div className="site-schedule-dates">
             <SiteField label="Project commence date">
@@ -422,12 +429,6 @@ export default function ProjectDetailsPage() {
             />
           </SiteSection>
 
-          {/* 7. 3D view */}
-          <Overview3DPanel
-            project={project}
-            editable
-            onUpdated={setProject}
-          />
         </>
       ) : null}
 

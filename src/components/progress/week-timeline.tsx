@@ -6,12 +6,16 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { ArrowDown, ArrowUp, GripVertical, Trash2 } from "lucide-react";
 import { COMMON_STAGE_OPTIONS, STAGE_BAR_COLORS } from "@/lib/constants";
 import {
   createScheduleItem,
+  deleteScheduleItem,
   listSchedule,
+  reorderStages,
   updateScheduleItem,
 } from "@/lib/services/schedule";
 import type { Project, ScheduleItem } from "@/lib/types";
@@ -85,6 +89,7 @@ export function WeekTimeline({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [colorPickerId, setColorPickerId] = useState<string | null>(null);
+  const [dragRowId, setDragRowId] = useState<string | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const liveRangeRef = useRef<Record<string, Range>>({});
   const [liveRange, setLiveRange] = useState<Record<string, Range>>({});
@@ -212,6 +217,56 @@ export function WeekTimeline({
         },
         workspaceId,
       );
+      await refresh();
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function applyOrder(next: ScheduleItem[]) {
+    setLocalStages(next);
+    await reorderStages(
+      project.id,
+      next.map((s) => s.id),
+      workspaceId,
+    );
+    await refresh();
+  }
+
+  async function moveStage(id: string, direction: -1 | 1) {
+    const index = localStages.findIndex((s) => s.id === id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= localStages.length) return;
+    const next = [...localStages];
+    const [row] = next.splice(index, 1);
+    next.splice(target, 0, row);
+    await applyOrder(next);
+  }
+
+  async function onDropOnRow(targetId: string) {
+    const sourceId = dragRowId;
+    setDragRowId(null);
+    if (!sourceId || sourceId === targetId) return;
+    const from = localStages.findIndex((s) => s.id === sourceId);
+    const to = localStages.findIndex((s) => s.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...localStages];
+    const [row] = next.splice(from, 1);
+    next.splice(to, 0, row);
+    await applyOrder(next);
+  }
+
+  async function deleteStage(stage: ScheduleItem) {
+    if (!editable) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`Delete "${stage.name}"? This cannot be undone.`)
+    ) {
+      return;
+    }
+    setSavingId(stage.id);
+    try {
+      await deleteScheduleItem(project.id, stage.id, workspaceId);
       await refresh();
     } finally {
       setSavingId(null);
@@ -412,36 +467,94 @@ export function WeekTimeline({
                   : CUSTOM_VALUE;
 
             return (
-              <div key={stage.id} className="site-week-timeline-row">
+              <div
+                key={stage.id}
+                className="site-week-timeline-row"
+                data-row-dragging={dragRowId === stage.id}
+                onDragOver={
+                  editable ? (e: ReactDragEvent) => e.preventDefault() : undefined
+                }
+                onDrop={editable ? () => void onDropOnRow(stage.id) : undefined}
+              >
                 <div className="site-week-timeline-name">
                   {editable ? (
                     <>
-                      <select
-                        className="site-week-timeline-select"
-                        value={selectValue}
-                        disabled={savingId === stage.id}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          if (value === CUSTOM_VALUE) {
-                            setCustomEditingId(stage.id);
-                            setCustomName(nameInPresets ? "" : stage.name);
-                            return;
-                          }
-                          setCustomEditingId(null);
-                          void renameStage(stage, value);
-                        }}
-                        aria-label="Stage"
-                      >
-                        {!nameInPresets && customEditingId !== stage.id ? (
-                          <option value={CUSTOM_VALUE}>{stage.name}</option>
-                        ) : null}
-                        {selectOptions.map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                        <option value={CUSTOM_VALUE}>Custom stage…</option>
-                      </select>
+                      <div className="site-week-timeline-name-row">
+                        <div className="site-week-timeline-name-controls">
+                          <span
+                            className="site-week-timeline-drag-handle"
+                            draggable
+                            onDragStart={(e: ReactDragEvent) => {
+                              e.stopPropagation();
+                              setDragRowId(stage.id);
+                            }}
+                            onDragEnd={() => setDragRowId(null)}
+                            title="Drag to reorder"
+                            aria-label="Drag to reorder"
+                          >
+                            <GripVertical size={12} />
+                          </span>
+                          <button
+                            type="button"
+                            className="site-week-timeline-icon-btn"
+                            onClick={() => void moveStage(stage.id, -1)}
+                            disabled={rowIndex === 0 || savingId === stage.id}
+                            title="Move up"
+                            aria-label="Move up"
+                          >
+                            <ArrowUp size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="site-week-timeline-icon-btn"
+                            onClick={() => void moveStage(stage.id, 1)}
+                            disabled={
+                              rowIndex === localStages.length - 1 ||
+                              savingId === stage.id
+                            }
+                            title="Move down"
+                            aria-label="Move down"
+                          >
+                            <ArrowDown size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="site-week-timeline-icon-btn site-week-timeline-icon-btn-danger"
+                            onClick={() => void deleteStage(stage)}
+                            disabled={savingId === stage.id}
+                            title="Delete stage"
+                            aria-label="Delete stage"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                        <select
+                          className="site-week-timeline-select"
+                          value={selectValue}
+                          disabled={savingId === stage.id}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            if (value === CUSTOM_VALUE) {
+                              setCustomEditingId(stage.id);
+                              setCustomName(nameInPresets ? "" : stage.name);
+                              return;
+                            }
+                            setCustomEditingId(null);
+                            void renameStage(stage, value);
+                          }}
+                          aria-label="Stage"
+                        >
+                          {!nameInPresets && customEditingId !== stage.id ? (
+                            <option value={CUSTOM_VALUE}>{stage.name}</option>
+                          ) : null}
+                          {selectOptions.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                          <option value={CUSTOM_VALUE}>Custom stage…</option>
+                        </select>
+                      </div>
                       {customEditingId === stage.id ? (
                         <div className="site-week-timeline-custom">
                           <input

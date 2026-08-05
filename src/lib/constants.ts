@@ -8,30 +8,34 @@ export const PLATFORM_KICKER = "PROJECT OPERATIONS";
 /** @deprecated use PLATFORM_NAME — kept for older imports */
 export const COMPANY_NAME = PLATFORM_NAME;
 
-/** Preset options only — never auto-applied to a project. */
+/** Preset options only — never auto-applied to a project. Order matters. */
 export const COMMON_STAGE_OPTIONS = [
-  "Site protection",
-  "Demolition",
-  "Masonry work",
+  "Protection work",
   "Plumbing work",
   "Electrical work",
-  "Air-conditioning work",
+  "Air con work",
   "Waterproofing work",
   "Tiling work",
-  "Ceiling work",
-  "Painting work",
-  "Door and window work",
+  "False ceiling & partition",
+  "Aluminium work",
   "Glass work",
+  "Painting work",
+  "Erect scaffolding",
+  "Door work",
+  "Parquet re-varnish",
+  "Marble re-varnish",
   "Carpentry fabrication",
   "Carpentry installation",
-  "Countertop installation",
+  "Air con installation",
+  "Light fitting install",
+  "Table installation",
   "Sanitary installation",
-  "Lighting installation",
-  "Appliance installation",
-  "Cleaning work",
-  "Touch-up work",
-  "Defect rectification",
-  "Handover",
+  "Awning work",
+  "Outdoor waterproofing",
+  "Metal work",
+  "Joint inspection",
+  "General cleaning",
+  "Target handover",
 ] as const;
 
 /** @deprecated use COMMON_STAGE_OPTIONS — kept for category seed compatibility */
