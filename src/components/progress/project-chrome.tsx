@@ -107,9 +107,12 @@ export function ProjectChrome({
 export function ProjectChromeActions({
   projectId,
   onStages,
+  onDelete,
 }: {
   projectId: string;
   onStages?: () => void;
+  /** When provided, shows a "Delete project" action regardless of active tab. */
+  onDelete?: () => void;
 }) {
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -125,6 +128,16 @@ export function ProjectChromeActions({
           Stages
         </SiteButton>
       )}
+      {onDelete ? (
+        <SiteButton
+          type="button"
+          variant="ghost"
+          onClick={onDelete}
+          style={{ color: "var(--site-danger)" }}
+        >
+          Delete project
+        </SiteButton>
+      ) : null}
     </div>
   );
 }

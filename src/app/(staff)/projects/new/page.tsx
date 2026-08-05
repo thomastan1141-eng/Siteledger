@@ -262,7 +262,6 @@ export default function NewProjectPage() {
               spellCheck={false}
               value={form.address}
               onChange={(e) => set("address", e.target.value)}
-              placeholder="e.g. 19 Burnfoot Terrace"
             />
           </SiteField>
         </div>

@@ -182,6 +182,12 @@ export default function ProjectDetailsPage() {
     return <p style={{ color: "var(--site-text-secondary)" }}>Project not found.</p>;
   }
 
+  const canDeleteProject = Boolean(
+    profile?.uid &&
+      (project.createdBy === profile.uid ||
+        (!project.createdBy && profile.role === "admin")),
+  );
+
   return (
     <div>
       <ProjectChrome
@@ -198,6 +204,16 @@ export default function ProjectDetailsPage() {
           <ProjectChromeActions
             projectId={project.id}
             onStages={() => setManageStagesOpen(true)}
+            onDelete={
+              canDeleteProject
+                ? () => {
+                    setDeleteOpen(true);
+                    setDeleteConfirm("");
+                    setDeletePassword("");
+                    setDeleteError("");
+                  }
+                : undefined
+            }
           />
         }
       />
@@ -499,7 +515,6 @@ export default function ProjectDetailsPage() {
                     setEdit((s) => ({ ...s, address: e.target.value }))
                   }
                   disabled={profile?.role !== "admin"}
-                  placeholder="e.g. 19 Burnfoot Terrace"
                 />
               </SiteField>
             </div>
@@ -619,22 +634,6 @@ export default function ProjectDetailsPage() {
                 }}
               >
                 Mark completed
-              </SiteButton>
-            ) : null}
-            {profile?.uid &&
-            (project.createdBy === profile.uid ||
-              (!project.createdBy && profile.role === "admin")) ? (
-              <SiteButton
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setDeleteOpen(true);
-                  setDeleteConfirm("");
-                  setDeletePassword("");
-                  setDeleteError("");
-                }}
-              >
-                Delete project
               </SiteButton>
             ) : null}
           </div>
