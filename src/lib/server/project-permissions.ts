@@ -125,8 +125,13 @@ export async function assertProjectPermission(input: {
   );
 
   const canManageAll = ctx.role === "owner" || ctx.role === "admin";
-  const canStaffAccess =
-    ctx.role === "staff" && ctx.isStaffAssigned;
+  // Any active staff-side workspace member gets blanket project access,
+  // consistent with Firestore Rules' canAccessTenant() and every other
+  // sub-resource (schedule, journal, purchases, etc.). Requiring an
+  // explicit staffIds/managerId match here was the same class of bug
+  // that made Schedule/Media unusable for staff before it was fixed in
+  // firestore.rules — do not reintroduce it.
+  const canStaffAccess = ctx.role === "staff";
   const canClientView =
     ctx.role === "client" && ctx.isClientAssigned;
 

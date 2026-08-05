@@ -152,6 +152,29 @@ export async function POST(
     const libraryId = bunnyConfig.libraryId;
     // Direct CDN MP4 path used when MP4 fallback is enabled in Bunny.
     const url = `https://vz-${libraryId}.b-cdn.net/${bunnyVideoId}/play_720p.mp4`;
+
+    // Bunny's "Block Direct URL File Access" library setting can reject
+    // this direct CDN link even when the MP4 file itself exists. Verify
+    // reachability server-side so we never claim success on a URL that
+    // will 403/404 for the user — confirm before advertising a download.
+    let reachable = false;
+    try {
+      const check = await fetch(url, { method: "HEAD" });
+      reachable = check.ok;
+    } catch {
+      reachable = false;
+    }
+    if (!reachable) {
+      return NextResponse.json(
+        {
+          error:
+            "Video download is currently blocked by Bunny Stream security settings (Block Direct URL File Access). Playback still works. Ask an administrator to allow this domain or disable that setting in the Bunny Stream library security settings.",
+          downloadAvailable: false,
+        },
+        { status: 404 },
+      );
+    }
+
     return NextResponse.json({
       ok: true,
       kind: "video",

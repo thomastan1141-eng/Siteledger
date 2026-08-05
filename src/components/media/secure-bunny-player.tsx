@@ -4,6 +4,7 @@ import { useState } from "react";
 import { SiteButton } from "@/components/progress/primitives";
 import { fetchBunnyPlayback } from "@/lib/bunny/client-upload";
 import type { MediaItem } from "@/lib/types";
+import { BunnyThumbnail } from "./bunny-thumbnail";
 
 export function SecureBunnyPlayer({
   item,
@@ -81,15 +82,11 @@ export function SecureBunnyPlayer({
           background: "#111",
         }}
       >
-        {item.thumbnailUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={item.thumbnailUrl}
-            alt={title}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            referrerPolicy="strict-origin-when-cross-origin"
-          />
-        ) : null}
+        <BunnyThumbnail
+          src={item.thumbnailUrl}
+          alt={title}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
         <div
           style={{
             position: "absolute",
