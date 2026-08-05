@@ -8,6 +8,7 @@ import {
 import { writeAuditEvent } from "@/lib/server/audit";
 import { getAdminDb, getAdminAuth } from "@/lib/firebase-admin";
 import { deleteBunnyVideo } from "@/lib/bunny/server";
+import { deleteCollectionInBatches } from "@/lib/server/delete-collection";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -94,13 +95,10 @@ export async function POST(
       "members",
       "invitations",
     ]) {
-      const subSnap = await db
-        .collection(`companies/${workspaceId}/projects/${projectId}/${sub}`)
-        .limit(400)
-        .get();
-      const batch = db.batch();
-      subSnap.docs.forEach((d) => batch.delete(d.ref));
-      if (!subSnap.empty) await batch.commit();
+      await deleteCollectionInBatches(
+        db,
+        `companies/${workspaceId}/projects/${projectId}/${sub}`,
+      );
     }
 
     await ref.delete();

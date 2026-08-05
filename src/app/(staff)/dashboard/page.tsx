@@ -31,14 +31,19 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function load() {
+      const ws =
+        workspaceId ||
+        profile?.defaultWorkspaceId ||
+        profile?.companyId ||
+        "";
+      if (!ws) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
         const all = await listProjects({
-          workspaceId:
-            workspaceId ||
-            profile?.defaultWorkspaceId ||
-            profile?.companyId ||
-            undefined,
+          workspaceId: ws,
           ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
         });
         setProjects(all);

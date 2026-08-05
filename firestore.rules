@@ -94,6 +94,11 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/companies/$(companyId)/projects/$(projectId)).data;
     }
 
+    // Safe accessor: legacy projects may not have clientUserIds set.
+    function projectClientUserIds(companyId, projectId) {
+      return projectDoc(companyId, projectId).get('clientUserIds', []);
+    }
+
     // ---- Top-level SaaS users ----
     match /users/{userId} {
       allow read: if signedIn() && request.auth.uid == userId;
@@ -193,20 +198,18 @@ service cloud.firestore {
             && resource.data.createdBy == request.auth.uid;
         }
 
-        // Trashed projects: creator recovery only. Active projects: tenant/staff/client.
+        // Trashed projects: creator recovery only. Active projects: any staff-side
+        // tenant user (consistent with schedule/media/updates/etc. below) or an
+        // assigned client. Staff assignment (staffIds/managerId) is an app-level
+        // filter (see listProjects({staffId})), not a Rules-level restriction —
+        // restricting it here caused staff accounts to permission-deny on their
+        // own dashboard/schedule/project lists.
         allow read: if (
             projectNotTrashed()
             && (
-              isTenantAdmin(companyId)
-              || isWorkspaceMember(companyId)
-              || (hasCompanyUser(companyId)
-                  && companyProfile(companyId).role == 'staff'
-                  && (
-                    request.auth.uid in resource.data.staffIds
-                    || resource.data.managerId == request.auth.uid
-                  ))
+              canAccessTenant(companyId)
               || (isCompanyClient(companyId)
-                  && request.auth.uid in resource.data.clientUserIds)
+                  && request.auth.uid in resource.data.get('clientUserIds', []))
             )
           )
           || (isProjectCreator()
@@ -218,13 +221,7 @@ service cloud.firestore {
           && request.resource.data.createdBy == request.auth.uid;
 
         allow update: if projectNotTrashed()
-          && (isTenantAdmin(companyId)
-            || (hasCompanyUser(companyId)
-                && companyProfile(companyId).role == 'staff'
-                && (
-                  request.auth.uid in resource.data.staffIds
-                  || resource.data.managerId == request.auth.uid
-                )))
+          && canAccessTenant(companyId)
           && request.resource.data.companyId == resource.data.companyId
           // workspaceId / createdBy immutable once set; may be stamped on legacy docs.
           && (
@@ -257,37 +254,45 @@ service cloud.firestore {
         match /schedule/{itemId} {
           allow read: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
-                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
+                && request.auth.uid in projectClientUserIds(companyId, projectId));
           allow write: if canAccessTenant(companyId);
         }
 
         match /dailyPlans/{planId} {
           allow read: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
-                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
+                && request.auth.uid in projectClientUserIds(companyId, projectId));
           allow write: if canAccessTenant(companyId);
         }
 
         match /updates/{updateId} {
           allow read: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
-                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
+                && request.auth.uid in projectClientUserIds(companyId, projectId)
                 && resource.data.visibility == 'client_visible');
           allow create: if canAccessTenant(companyId);
           allow update, delete: if canAccessTenant(companyId);
         }
 
         match /media/{mediaId} {
-          allow read: if (canAccessTenant(companyId)
+          function mediaNotTombstoned() {
+            return !('status' in resource.data)
+              || !(resource.data.status in ['DELETED', 'CANCELLED']);
+          }
+
+          // Nobody — staff, tenant, or client — may read tombstoned media.
+          // Lists must query `where mediaLifecycle == "active"` so tombstones
+          // never enter a query's result set; getDoc on a tombstoned id is
+          // also denied here as defense in depth.
+          allow read: if mediaNotTombstoned()
+            && (
+              canAccessTenant(companyId)
               || (isCompanyClient(companyId)
-                  && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
+                  && request.auth.uid in projectClientUserIds(companyId, projectId)
                   && (
                     resource.data.clientVisible == true
                     || resource.data.visibility in ['client_visible', 'handover']
-                  )))
-            && (
-              !('status' in resource.data)
-              || !(resource.data.status in ['DELETED', 'CANCELLED'])
+                  ))
             );
 
           // Photos may be created by staff clients; Bunny videos are Admin SDK only.
@@ -304,7 +309,8 @@ service cloud.firestore {
                 'bunnyVideoId', 'bunnyLibraryId', 'provider',
                 'workspaceId', 'companyId', 'projectId', 'uploadedBy',
                 'createdAt', 'readyAt', 'status', 'storageSizeBytes',
-                'encodeProgress', 'sourceSizeBytes', 'clientUploadId'
+                'encodeProgress', 'sourceSizeBytes', 'clientUploadId',
+                'mediaLifecycle'
               ]);
 
           allow delete: if isTenantAdmin(companyId);
@@ -313,17 +319,17 @@ service cloud.firestore {
         match /purchases/{purchaseId} {
           allow read: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
-                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds);
+                && request.auth.uid in projectClientUserIds(companyId, projectId));
 
           allow create: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
-                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
+                && request.auth.uid in projectClientUserIds(companyId, projectId)
                 && request.resource.data.purchaseResponsibility == 'OWNER'
                 && request.resource.data.projectId == projectId);
 
           allow update: if canAccessTenant(companyId)
             || (isCompanyClient(companyId)
-                && request.auth.uid in projectDoc(companyId, projectId).clientUserIds
+                && request.auth.uid in projectClientUserIds(companyId, projectId)
                 && resource.data.purchaseResponsibility == 'OWNER'
                 && request.resource.data.purchaseResponsibility == 'OWNER');
 

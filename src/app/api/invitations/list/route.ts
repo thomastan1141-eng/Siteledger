@@ -45,7 +45,9 @@ export async function GET(request: Request) {
       );
     }
 
+    // collectionGroup("members") also matches workspaces/*/members — keep project members only.
     const members = membersSnap.docs
+      .filter((doc) => doc.ref.path.includes("/projects/"))
       .map((doc) => {
         const data = doc.data() || {};
         const projectId = String(data.projectId || "");
@@ -62,7 +64,7 @@ export async function GET(request: Request) {
           acceptedAt: (data.acceptedAt as string) || null,
         };
       })
-      .filter((m) => m.status !== "REMOVED")
+      .filter((m) => m.status !== "REMOVED" && Boolean(m.projectId))
       .sort((a, b) => (b.acceptedAt || b.invitedAt || "").localeCompare(a.acceptedAt || a.invitedAt || ""));
 
     const pendingInvitations = invitationsSnap.docs

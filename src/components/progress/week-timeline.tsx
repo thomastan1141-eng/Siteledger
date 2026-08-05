@@ -78,6 +78,7 @@ export function WeekTimeline({
   editable?: boolean;
   onChanged?: (stages: ScheduleItem[]) => void;
 }) {
+  const workspaceId = project.workspaceId || project.companyId;
   const [localStages, setLocalStages] = useState(stages);
   const [customEditingId, setCustomEditingId] = useState<string | null>(null);
   const [customName, setCustomName] = useState("");
@@ -121,10 +122,10 @@ export function WeekTimeline({
   const weeks = Array.from({ length: 12 }, (_, i) => i + 1);
 
   const refresh = useCallback(async () => {
-    const next = await listSchedule(project.id);
+    const next = await listSchedule(project.id, { workspaceId });
     setLocalStages(next);
     onChanged?.(next);
-  }, [project.id, onChanged]);
+  }, [project.id, workspaceId, onChanged]);
 
   function setRangeFor(stageId: string, range: Range | null) {
     if (!range) {
@@ -148,15 +149,19 @@ export function WeekTimeline({
       const plannedEndDate = dateKeyFromWeekEnd(origin, 0);
       const barColor =
         STAGE_BAR_COLORS[localStages.length % STAGE_BAR_COLORS.length].value;
-      await createScheduleItem(project.id, {
-        name,
-        source: preset ? "preset" : "custom",
-        plannedStartDate,
-        plannedEndDate,
-        status: "not_started",
-        barColor,
-        sortOrder: localStages.length,
-      });
+      await createScheduleItem(
+        project.id,
+        {
+          name,
+          source: preset ? "preset" : "custom",
+          plannedStartDate,
+          plannedEndDate,
+          status: "not_started",
+          barColor,
+          sortOrder: localStages.length,
+        },
+        workspaceId,
+      );
       await refresh();
     } finally {
       setAdding(false);
@@ -166,7 +171,12 @@ export function WeekTimeline({
   async function setBarColor(stage: ScheduleItem, barColor: string) {
     setSavingId(stage.id);
     try {
-      await updateScheduleItem(project.id, stage.id, { barColor });
+      await updateScheduleItem(
+        project.id,
+        stage.id,
+        { barColor },
+        workspaceId,
+      );
       setLocalStages((prev) =>
         prev.map((s) => (s.id === stage.id ? { ...s, barColor } : s)),
       );
@@ -193,10 +203,15 @@ export function WeekTimeline({
       const isPreset = (COMMON_STAGE_OPTIONS as readonly string[]).includes(
         name,
       );
-      await updateScheduleItem(project.id, stage.id, {
-        name,
-        source: isPreset ? "preset" : "custom",
-      });
+      await updateScheduleItem(
+        project.id,
+        stage.id,
+        {
+          name,
+          source: isPreset ? "preset" : "custom",
+        },
+        workspaceId,
+      );
       await refresh();
     } finally {
       setSavingId(null);
@@ -208,10 +223,15 @@ export function WeekTimeline({
     const plannedEndDate = dateKeyFromWeekEnd(origin, end);
     setSavingId(stageId);
     try {
-      await updateScheduleItem(project.id, stageId, {
-        plannedStartDate,
-        plannedEndDate,
-      });
+      await updateScheduleItem(
+        project.id,
+        stageId,
+        {
+          plannedStartDate,
+          plannedEndDate,
+        },
+        workspaceId,
+      );
       setLocalStages((prev) =>
         prev.map((s) =>
           s.id === stageId ? { ...s, plannedStartDate, plannedEndDate } : s,

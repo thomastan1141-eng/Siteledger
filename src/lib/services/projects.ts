@@ -4,7 +4,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  orderBy,
   query,
   updateDoc,
   where,
@@ -19,7 +18,10 @@ import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "../firebase"
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_PROJECTS } from "../demo";
 import {
+  LEGACY_TENANT_ID,
+  LISTABLE_PROJECT_STATUSES,
   projectsPath,
+  requireTenantId,
   storage3dPath,
   storageCoverPath,
   tenantId,
@@ -122,13 +124,20 @@ function resolveTenant(workspaceId?: string | null) {
 }
 
 function requireWorkspaceId(workspaceId?: string | null) {
-  const ws = workspaceId?.trim();
-  if (!ws) {
-    throw new Error(
-      "Workspace is not ready yet. Refresh the page and try again.",
-    );
+  return requireTenantId(workspaceId);
+}
+
+function sortByUpdatedAtDesc(projects: Project[]) {
+  return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/** Statuses allowed in Client list queries (must match readable Rules set). */
+function listableStatuses(filter?: ProjectStatus): ProjectStatus[] {
+  if (!filter) return [...LISTABLE_PROJECT_STATUSES];
+  if (filter === "trashed" || filter === "purging") {
+    throw new Error("Use listTrashedProjects for deleted projects.");
   }
-  return ws;
+  return [filter];
 }
 
 export async function listProjects(options?: {
@@ -136,18 +145,16 @@ export async function listProjects(options?: {
   staffId?: string;
   workspaceId?: string;
 }) {
-  const ws = options?.workspaceId?.trim()
-    ? options.workspaceId.trim()
-    : resolveTenant(options?.workspaceId);
+  const ws = requireTenantId(
+    options?.workspaceId || undefined,
+  );
+  const statuses = listableStatuses(options?.status);
 
   if (AUTH_BYPASS) {
     let projects = [...demoProjects]
       .filter((p) => (p.workspaceId || COMPANY_ID) === ws)
-      .filter((p) => p.status !== "trashed" && p.status !== "purging")
+      .filter((p) => statuses.includes(p.status))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    if (options?.status) {
-      projects = projects.filter((p) => p.status === options.status);
-    }
     if (options?.staffId) {
       projects = projects.filter(
         (p) =>
@@ -160,116 +167,150 @@ export async function listProjects(options?: {
 
   const col = collection(getFirebaseDb(), projectsPath(ws));
 
-  // Staff must query by assignment so Firestore rules can authorize each doc.
+  // Staff: constrain assignment + listable status so Rules can authorize the query.
   if (options?.staffId) {
     const staffQuery = query(
       col,
       where("staffIds", "array-contains", options.staffId),
+      where("status", "in", statuses),
     );
     const snap = await getDocs(staffQuery);
-    let projects = snap.docs
-      .map((d) => mapProject(d.id, d.data()))
-      .filter((p) => (p.workspaceId || p.companyId || COMPANY_ID) === ws)
-      .filter((p) => p.status !== "trashed" && p.status !== "purging")
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    if (options?.status) {
-      projects = projects.filter((p) => p.status === options.status);
-    }
-    return projects;
+    return sortByUpdatedAtDesc(
+      snap.docs
+        .map((d) => mapProject(d.id, d.data()))
+        .filter((p) => (p.workspaceId || p.companyId || COMPANY_ID) === ws),
+    );
   }
 
-  // Path already scopes to workspace; also filter workspaceId for defense in depth.
+  // Exclude trashed/purging in the query (not only client-side) for Rules safety.
   const q = query(
     col,
     where("workspaceId", "==", ws),
-    orderBy("updatedAt", "desc"),
+    where("status", "in", statuses),
   );
 
   try {
     const snap = await getDocs(q);
-    let projects = snap.docs
-      .map((d) => mapProject(d.id, d.data()))
-      .filter((p) => p.status !== "trashed" && p.status !== "purging");
-    if (options?.status) {
-      projects = projects.filter((p) => p.status === options.status);
-    }
-    return projects;
+    return sortByUpdatedAtDesc(snap.docs.map((d) => mapProject(d.id, d.data())));
   } catch (err) {
-    // Fallback for legacy docs missing workspaceId / missing composite index.
+    // Legacy docs missing workspaceId: path-scoped status filter only.
     console.warn("[listProjects] scoped query failed, falling back", err);
-    const snap = await getDocs(query(col, orderBy("updatedAt", "desc")));
-    let projects = snap.docs
-      .map((d) => mapProject(d.id, d.data()))
-      .filter(
-        (p) =>
-          (p.workspaceId || p.companyId || COMPANY_ID) === ws ||
-          !p.workspaceId,
-      )
-      .filter((p) => p.status !== "trashed" && p.status !== "purging");
-    if (options?.status) {
-      projects = projects.filter((p) => p.status === options.status);
-    }
-    return projects;
+    const snap = await getDocs(query(col, where("status", "in", statuses)));
+    return sortByUpdatedAtDesc(
+      snap.docs
+        .map((d) => mapProject(d.id, d.data()))
+        .filter(
+          (p) =>
+            (p.workspaceId || p.companyId || COMPANY_ID) === ws ||
+            !p.workspaceId,
+        ),
+    );
   }
 }
 
-/** Creator-only: list soft-deleted projects. */
-export async function listTrashedProjects(workspaceId?: string) {
-  const ws = resolveTenant(workspaceId);
+/** Creator-only: list soft-deleted projects. Must filter createdBy for rules. */
+export async function listTrashedProjects(
+  workspaceId?: string,
+  createdByUid?: string,
+) {
+  const ws = requireTenantId(workspaceId);
   if (AUTH_BYPASS) {
     return demoProjects.filter(
       (p) =>
-        (p.workspaceId || COMPANY_ID) === ws && p.status === "trashed",
+        (p.workspaceId || COMPANY_ID) === ws &&
+        p.status === "trashed" &&
+        (!createdByUid || p.createdBy === createdByUid),
     );
   }
+  if (!createdByUid) return [];
+
   const col = collection(getFirebaseDb(), projectsPath(ws));
-  const q = query(col, where("status", "==", "trashed"));
-  const snap = await getDocs(q);
-  return snap.docs
-    .map((d) => mapProject(d.id, d.data()))
-    .sort((a, b) =>
-      String(b.deletedAt || "").localeCompare(String(a.deletedAt || "")),
-    );
+  // Rules only allow creators to read trashed docs — query must include createdBy.
+  const q = query(
+    col,
+    where("status", "==", "trashed"),
+    where("createdBy", "==", createdByUid),
+  );
+  try {
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => mapProject(d.id, d.data()))
+      .sort((a, b) =>
+        String(b.deletedAt || "").localeCompare(String(a.deletedAt || "")),
+      );
+  } catch (err) {
+    console.warn("[listTrashedProjects]", err);
+    return [];
+  }
 }
 
 export async function listClientProjects(
   clientUid: string,
   workspaceId?: string,
 ) {
-  const ws = resolveTenant(workspaceId);
-
   if (AUTH_BYPASS) {
+    const ws = workspaceId?.trim() || COMPANY_ID;
     return demoProjects
       .filter(
         (p) =>
           p.clientUserIds?.includes(clientUid) &&
-          (p.workspaceId || COMPANY_ID) === ws,
+          (p.workspaceId || COMPANY_ID) === ws &&
+          LISTABLE_PROJECT_STATUSES.includes(p.status),
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  const col = collection(getFirebaseDb(), projectsPath(ws));
-  const q = query(col, where("clientUserIds", "array-contains", clientUid));
-  const snap = await getDocs(q);
-  return snap.docs
-    .map((d) => mapProject(d.id, d.data()))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  // Prefer explicit workspace; otherwise scan company user default via caller.
+  // When workspace omitted, try legacy tenant only as last resort for old clients.
+  const candidates = Array.from(
+    new Set(
+      [workspaceId?.trim(), LEGACY_TENANT_ID].filter(Boolean) as string[],
+    ),
+  );
+
+  const all: Project[] = [];
+  for (const ws of candidates) {
+    const col = collection(getFirebaseDb(), projectsPath(ws));
+    const q = query(
+      col,
+      where("clientUserIds", "array-contains", clientUid),
+      where("status", "in", LISTABLE_PROJECT_STATUSES),
+    );
+    try {
+      const snap = await getDocs(q);
+      all.push(...snap.docs.map((d) => mapProject(d.id, d.data())));
+    } catch (err) {
+      console.warn("[listClientProjects]", ws, err);
+    }
+    if (all.length && workspaceId?.trim()) break;
+  }
+
+  const seen = new Set<string>();
+  return sortByUpdatedAtDesc(
+    all.filter((p) => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    }),
+  );
 }
 
 export async function getProject(
   projectId: string,
   workspaceId?: string,
 ) {
-  const ws = resolveTenant(workspaceId);
+  const ws = workspaceId?.trim()
+    ? requireTenantId(workspaceId)
+    : resolveTenant(workspaceId);
   if (AUTH_BYPASS) {
     return demoProjects.find((p) => p.id === projectId) || null;
   }
   const snap = await getDoc(doc(getFirebaseDb(), projectsPath(ws), projectId));
   if (!snap.exists()) {
     // Legacy fallback: try default company path once.
-    if (ws !== COMPANY_ID) {
+    if (ws !== LEGACY_TENANT_ID) {
       const legacy = await getDoc(
-        doc(getFirebaseDb(), projectsPath(COMPANY_ID), projectId),
+        doc(getFirebaseDb(), projectsPath(LEGACY_TENANT_ID), projectId),
       );
       if (legacy.exists()) return mapProject(legacy.id, legacy.data());
     }

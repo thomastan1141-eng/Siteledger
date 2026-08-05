@@ -621,7 +621,9 @@ export default function ProjectDetailsPage() {
                 Mark completed
               </SiteButton>
             ) : null}
-            {project.createdBy === profile?.uid ? (
+            {profile?.uid &&
+            (project.createdBy === profile.uid ||
+              (!project.createdBy && profile.role === "admin")) ? (
               <SiteButton
                 type="button"
                 variant="ghost"

@@ -34,10 +34,12 @@ export default function RecentlyDeletedPage() {
   const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId;
 
   async function reload() {
-    const list = await listTrashedProjects(ws || undefined);
-    setProjects(
-      list.filter((p) => p.createdBy === profile?.uid || p.deletedBy === profile?.uid),
-    );
+    if (!profile?.uid) {
+      setProjects([]);
+      return;
+    }
+    const list = await listTrashedProjects(ws || undefined, profile.uid);
+    setProjects(list);
   }
 
   useEffect(() => {

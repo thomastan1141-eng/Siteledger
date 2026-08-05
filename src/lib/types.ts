@@ -410,6 +410,12 @@ export interface MediaItem {
   updatedBy?: string | null;
   readyAt?: string | null;
   deletedAt?: string | null;
+  /**
+   * Query-safe lifecycle flag. Set "active" on every new media doc; flipped to
+   * "tombstoned" on soft-delete/cancel. Lists filter on this field directly so
+   * Rules never need to grant read access to tombstoned docs.
+   */
+  mediaLifecycle?: "active" | "tombstoned";
   /** Bunny Stream fields — server-controlled. */
   bunnyLibraryId?: number | string;
   bunnyVideoId?: string;

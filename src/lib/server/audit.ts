@@ -2,6 +2,7 @@ import "server-only";
 
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase-admin";
+import { auditEventsPath } from "@/lib/paths";
 
 export type AuditAction =
   | "PROJECT_CREATED"
@@ -30,7 +31,7 @@ export async function writeAuditEvent(input: {
   newValue?: unknown;
 }) {
   const db = getAdminDb();
-  await db.collection(`companies/${input.workspaceId}/auditEvents`).add({
+  await db.collection(auditEventsPath(input.workspaceId)).add({
     projectId: input.projectId || null,
     action: input.action,
     performedBy: input.performedBy,

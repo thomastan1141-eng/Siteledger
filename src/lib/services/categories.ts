@@ -11,7 +11,7 @@ import {
 import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID, DEFAULT_WORK_CATEGORIES } from "../constants";
 import { AUTH_BYPASS } from "../demo";
-import { categoriesPath } from "../paths";
+import { categoriesPath, requireTenantId } from "../paths";
 import type { WorkCategory } from "../types";
 
 function demoCategories(): WorkCategory[] {
@@ -27,7 +27,7 @@ function demoCategories(): WorkCategory[] {
 export async function listWorkCategories(workspaceId?: string) {
   if (AUTH_BYPASS) return demoCategories();
 
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   const q = query(
     collection(getFirebaseDb(), categoriesPath(ws)),
     orderBy("sortOrder", "asc"),
@@ -42,7 +42,7 @@ export async function listWorkCategories(workspaceId?: string) {
 export async function seedDefaultWorkCategories(workspaceId?: string) {
   if (AUTH_BYPASS) return demoCategories();
 
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   const existing = await listWorkCategories(ws);
   if (existing.length) return existing;
 
@@ -70,7 +70,7 @@ export async function createWorkCategory(
   sortOrder = 999,
   workspaceId?: string,
 ) {
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   const data: Omit<WorkCategory, "id"> = {
     companyId: ws,
     name,
@@ -86,6 +86,6 @@ export async function setWorkCategoryActive(
   active: boolean,
   workspaceId?: string,
 ) {
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   await updateDoc(doc(getFirebaseDb(), categoriesPath(ws), id), { active });
 }

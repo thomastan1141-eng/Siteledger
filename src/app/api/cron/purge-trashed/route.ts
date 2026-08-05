@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { deleteBunnyVideo } from "@/lib/bunny/server";
 import { writeAuditEvent } from "@/lib/server/audit";
+import { deleteCollectionInBatches } from "@/lib/server/delete-collection";
 import { getStorage } from "firebase-admin/storage";
 
 export const runtime = "nodejs";
@@ -68,7 +69,6 @@ export async function POST(request: Request) {
         await media.ref.delete();
       }
 
-      // Delete subcollections
       for (const sub of [
         "schedule",
         "updates",
@@ -77,13 +77,10 @@ export async function POST(request: Request) {
         "members",
         "invitations",
       ]) {
-        const subSnap = await db
-          .collection(`companies/${workspaceId}/projects/${projectId}/${sub}`)
-          .limit(400)
-          .get();
-        const batch = db.batch();
-        subSnap.docs.forEach((d) => batch.delete(d.ref));
-        if (!subSnap.empty) await batch.commit();
+        await deleteCollectionInBatches(
+          db,
+          `companies/${workspaceId}/projects/${projectId}/${sub}`,
+        );
       }
 
       await doc.ref.delete();

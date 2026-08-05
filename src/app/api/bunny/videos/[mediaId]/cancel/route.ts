@@ -62,7 +62,10 @@ export async function POST(
 
     await updateMediaAdmin(ctx.workspaceId, projectId, mediaId, {
       status: cleanupFailed ? "FAILED" : "CANCELLED",
+      mediaLifecycle: cleanupFailed ? "active" : "tombstoned",
       deletedAt: new Date().toISOString(),
+      clientVisible: false,
+      visibility: "internal",
       errorCode: cleanupFailed ? "CLEANUP_PENDING" : null,
       errorMessage: cleanupFailed
         ? "Upload cancelled. Cleanup pending."

@@ -43,17 +43,19 @@ export function ClientProjectProvider({ children }: { children: ReactNode }) {
 
   async function reload() {
     if (!profile) return;
-    const projects = await listClientProjects(profile.uid);
+    const wsHint =
+      profile.defaultWorkspaceId || profile.companyId || undefined;
+    const projects = await listClientProjects(profile.uid, wsHint);
     const next = projects[0];
     if (!next) {
       setError("No project is linked to this client account.");
       setProject(null);
       return;
     }
-    const ws = next.workspaceId || next.companyId;
+    const ws = next.workspaceId || next.companyId || wsHint;
     const [s, u, m] = await Promise.all([
       listSchedule(next.id, { clientOnly: true, workspaceId: ws }),
-      listUpdates(next.id, { clientOnly: true }),
+      listUpdates(next.id, { clientOnly: true, workspaceId: ws }),
       listMedia(next.id, { clientOnly: true, workspaceId: ws }),
     ]);
     setProject(next);

@@ -91,6 +91,7 @@ export async function createBunnyMediaRecord(input: {
     bunnyLibraryId: Number(bunnyConfig.libraryId) || bunnyConfig.libraryId,
     bunnyVideoId: input.bunnyVideoId,
     status: "INITIALIZING" as BunnyVideoStatus,
+    mediaLifecycle: "active" as const,
     encodeProgress: null,
     originalFileName: input.fileName,
     fileName: input.fileName,
@@ -168,8 +169,11 @@ export async function softDeleteMedia(
 ) {
   await updateMediaAdmin(workspaceId, projectId, mediaId, {
     status: "DELETED",
+    mediaLifecycle: "tombstoned",
     deletedAt: new Date().toISOString(),
     downloadUrl: "",
+    clientVisible: false,
+    visibility: "internal",
   });
 }
 

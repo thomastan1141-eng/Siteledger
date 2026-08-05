@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# firebase emulators / admin scripts
+firestore-debug.log
+firebase-debug.log
+ui-debug.log
+storage-debug.log
+/backups/
+
+# firebase emulators / local admin script backups
+firestore-debug.log
+ui-debug.log
+storage-debug.log
+firebase-debug.log
+/backups/

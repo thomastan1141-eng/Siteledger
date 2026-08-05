@@ -11,7 +11,7 @@ import {
 import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_UPDATES } from "../demo";
-import { updatesPath } from "../paths";
+import { requireTenantId, updatesPath } from "../paths";
 import { todayKey } from "../utils";
 import {
   appendDemoMedia,
@@ -64,7 +64,7 @@ export async function listUpdates(
     });
   }
 
-  const workspaceId = options?.workspaceId?.trim() || COMPANY_ID;
+  const workspaceId = requireTenantId(options?.workspaceId);
   const q = query(
     collection(getFirebaseDb(), updatesPath(projectId, workspaceId)),
     orderBy("createdAt", "desc"),
@@ -93,7 +93,7 @@ export async function hasUpdateOnDate(
   if (AUTH_BYPASS) {
     return demoUpdates.some((u) => u.projectId === projectId && u.date === date);
   }
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   const q = query(
     collection(getFirebaseDb(), updatesPath(projectId, ws)),
     where("date", "==", date),
@@ -172,7 +172,7 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
   }
 
   const date = input.date || todayKey();
-  const workspaceId = input.workspaceId?.trim() || COMPANY_ID;
+  const workspaceId = requireTenantId(input.workspaceId);
   const mediaVisibility = toMediaVisibility(input.visibility);
   const mediaIds: string[] = [];
   let photoCount = 0;

@@ -9,9 +9,8 @@ import {
 } from "firebase/firestore";
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import { getFirebaseDb } from "../firebase";
-import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS } from "../demo";
-import { remindersPath } from "../paths";
+import { remindersPath, requireTenantId } from "../paths";
 import { getProjectDisplayName, todayKey } from "../utils";
 import { hasUpdateOnDate } from "./updates";
 import type { Project, Reminder } from "../types";
@@ -19,7 +18,7 @@ import type { Project, Reminder } from "../types";
 export async function listOpenReminders(workspaceId?: string) {
   if (AUTH_BYPASS) return [];
 
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   const q = query(
     collection(getFirebaseDb(), remindersPath(ws)),
     where("resolved", "==", false),
@@ -33,7 +32,7 @@ export async function listOpenReminders(workspaceId?: string) {
 }
 
 export async function resolveReminder(id: string, workspaceId?: string) {
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   await updateDoc(doc(getFirebaseDb(), remindersPath(ws), id), { resolved: true });
 }
 
@@ -41,7 +40,7 @@ export async function createReminder(
   input: Omit<Reminder, "id" | "companyId" | "createdAt" | "resolved">,
   workspaceId?: string,
 ) {
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   const data: Omit<Reminder, "id"> = {
     ...input,
     companyId: ws,

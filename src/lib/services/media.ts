@@ -6,6 +6,7 @@ import {
   orderBy,
   query,
   updateDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import {
@@ -15,9 +16,8 @@ import {
   type UploadTaskSnapshot,
 } from "firebase/storage";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "../firebase";
-import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_MEDIA } from "../demo";
-import { mediaPath, storageMediaPath } from "../paths";
+import { mediaPath, requireTenantId, storageMediaPath } from "../paths";
 import { isImageFile, isVideoFile, todayKey } from "../utils";
 import type { MediaItem, MediaType, MediaVisibility } from "../types";
 
@@ -55,7 +55,7 @@ export async function uploadMediaFile(
       : options.visibility === "internal"
         ? "internal"
         : "photos";
-  const tenant = options.workspaceId?.trim() || COMPANY_ID;
+  const tenant = requireTenantId(options.workspaceId);
 
   const path = storageMediaPath(
     projectId,
@@ -143,13 +143,14 @@ export async function createMediaRecord(
     workspaceId?: string;
   },
 ) {
-  const workspaceId = input.workspaceId?.trim() || COMPANY_ID;
+  const workspaceId = requireTenantId(input.workspaceId);
   const data: Omit<MediaItem, "id"> = {
     ...input,
     projectId,
     companyId: workspaceId,
     workspaceId,
     provider: input.provider || "FIREBASE_STORAGE",
+    mediaLifecycle: "active",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -175,20 +176,40 @@ export async function listMedia(
     workspaceId?: string;
   },
 ) {
-  const workspaceId = options?.workspaceId?.trim() || COMPANY_ID;
-  let items = AUTH_BYPASS
-    ? demoMedia.filter((m) => m.projectId === projectId)
-    : (
-        await getDocs(
-          query(
-            collection(getFirebaseDb(), mediaPath(projectId, workspaceId)),
-            orderBy("createdAt", "desc"),
-          ),
-        )
-      ).docs.map(
-        (d) =>
-          ({ id: d.id, ...(d.data() as Omit<MediaItem, "id">) }) as MediaItem,
-      );
+  const workspaceId = requireTenantId(options?.workspaceId);
+  let items: MediaItem[];
+
+  if (AUTH_BYPASS) {
+    items = demoMedia.filter((m) => m.projectId === projectId);
+  } else if (options?.clientOnly) {
+    // Query excludes tombstones and non-visible docs directly, so Rules never
+    // need to grant read access to anything the client can't already see.
+    const snap = await getDocs(
+      query(
+        collection(getFirebaseDb(), mediaPath(projectId, workspaceId)),
+        where("clientVisible", "==", true),
+        where("mediaLifecycle", "==", "active"),
+        orderBy("createdAt", "desc"),
+      ),
+    );
+    items = snap.docs.map(
+      (d) =>
+        ({ id: d.id, ...(d.data() as Omit<MediaItem, "id">) }) as MediaItem,
+    );
+  } else {
+    // Staff/tenant: query excludes tombstones so Rules can deny reading them outright.
+    const snap = await getDocs(
+      query(
+        collection(getFirebaseDb(), mediaPath(projectId, workspaceId)),
+        where("mediaLifecycle", "==", "active"),
+        orderBy("createdAt", "desc"),
+      ),
+    );
+    items = snap.docs.map(
+      (d) =>
+        ({ id: d.id, ...(d.data() as Omit<MediaItem, "id">) }) as MediaItem,
+    );
+  }
 
   items = items.filter(isActiveMedia);
 
@@ -219,7 +240,7 @@ export async function updateMediaVisibility(
   visibility: MediaVisibility,
   workspaceId?: string,
 ) {
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   const batch = writeBatch(getFirebaseDb());
   mediaIds.forEach((id) => {
     batch.update(doc(getFirebaseDb(), mediaPath(projectId, ws), id), {
@@ -238,7 +259,7 @@ export async function updateMediaCaption(
   caption: string,
   workspaceId?: string,
 ) {
-  const ws = workspaceId?.trim() || COMPANY_ID;
+  const ws = requireTenantId(workspaceId);
   await updateDoc(doc(getFirebaseDb(), mediaPath(projectId, ws), mediaId), {
     caption,
     updatedAt: new Date().toISOString(),

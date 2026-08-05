@@ -2,6 +2,7 @@ import "server-only";
 
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase-admin";
+import { createRequestsPath } from "@/lib/paths";
 
 /** Store idempotent create results under companies/{ws}/createRequests/{uid}_{requestId} */
 export async function getCreateRequest(
@@ -11,7 +12,7 @@ export async function getCreateRequest(
 ) {
   const id = `${uid}_${clientRequestId}`;
   const ref = getAdminDb().doc(
-    `companies/${workspaceId}/createRequests/${id}`,
+    `${createRequestsPath(workspaceId)}/${id}`,
   );
   const snap = await ref.get();
   if (!snap.exists) return null;
@@ -26,7 +27,7 @@ export async function saveCreateRequest(
 ) {
   const id = `${uid}_${clientRequestId}`;
   const ref = getAdminDb().doc(
-    `companies/${workspaceId}/createRequests/${id}`,
+    `${createRequestsPath(workspaceId)}/${id}`,
   );
   await ref.set(
     {

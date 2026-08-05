@@ -2,7 +2,8 @@ import { collection, doc, getDocs, setDoc } from "firebase/firestore";
 import { getFirebaseDb } from "../firebase";
 import { AUTH_BYPASS } from "../demo";
 import { COMPANY_ID, DEFAULT_WORK_ITEM_COLOR } from "../constants";
-import { dailyPlansPath, tenantId } from "../paths";
+import { dailyPlansPath, requireTenantId } from "../paths";
+import { sanitizeForFirestore } from "../sanitize";
 import type { DailyPlan, DailyPlanWorkItem } from "../types";
 
 let demoPlans: DailyPlan[] = [
@@ -35,7 +36,7 @@ export async function listDailyPlans(
   projectId: string,
   options?: { year?: number; month?: number; workspaceId?: string },
 ) {
-  const ws = tenantId(options?.workspaceId);
+  const ws = requireTenantId(options?.workspaceId);
   let plans: DailyPlan[];
 
   if (AUTH_BYPASS) {
@@ -74,7 +75,7 @@ export async function saveDailyPlan(input: {
   note?: string;
   workspaceId?: string;
 }) {
-  const ws = tenantId(input.workspaceId);
+  const ws = requireTenantId(input.workspaceId);
   const items = input.items
     .map((item) => ({
       workText: item.workText.trim(),
@@ -87,17 +88,17 @@ export async function saveDailyPlan(input: {
   const id = input.date;
   const existing = await getDailyPlan(input.projectId, input.date, ws);
 
-  const plan: DailyPlan = {
+  const plan = sanitizeForFirestore({
     id,
     projectId: input.projectId,
     companyId: ws,
     date: input.date,
     items,
-    reminder: input.reminder?.trim() || undefined,
-    note: input.note?.trim() || undefined,
+    reminder: input.reminder?.trim() || null,
+    note: input.note?.trim() || null,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
-  };
+  }) as DailyPlan;
 
   if (AUTH_BYPASS) {
     demoPlans = [
@@ -109,9 +110,10 @@ export async function saveDailyPlan(input: {
     return plan;
   }
 
+  const { id: _id, ...payload } = plan;
   await setDoc(
     doc(getFirebaseDb(), dailyPlansPath(input.projectId, ws), id),
-    plan,
+    payload,
     { merge: true },
   );
   return plan;

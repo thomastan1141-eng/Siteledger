@@ -20,7 +20,11 @@ import { AUTH_BYPASS } from "../demo";
 import { COMPANY_ID } from "../constants";
 import { compressImageFile } from "../image-compress";
 import { calcRmbSgdTotals, roundMoney } from "../money";
-import { purchasesPath, storagePurchasePhotoPath, tenantId } from "../paths";
+import {
+  purchasesPath,
+  requireTenantId,
+  storagePurchasePhotoPath,
+} from "../paths";
 import type {
   AppUser,
   LightingSpecifications,
@@ -33,7 +37,7 @@ import type {
 import { DEFAULT_RMB_TO_SGD_RATE } from "../types";
 
 function purchaseWorkspace(user?: AppUser | null, workspaceId?: string) {
-  return tenantId(
+  return requireTenantId(
     workspaceId || user?.defaultWorkspaceId || user?.companyId,
   );
 }
@@ -658,6 +662,7 @@ export async function uploadPurchasePhotos(
       projectId,
       purchaseId,
       uniqueFileName(file),
+      ws,
     );
     const storageRef = ref(getFirebaseStorage(), path);
     const task = uploadBytesResumable(storageRef, file, {

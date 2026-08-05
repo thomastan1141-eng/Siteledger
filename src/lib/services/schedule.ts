@@ -11,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { getFirebaseDb } from "../firebase";
 import { AUTH_BYPASS, DEMO_SCHEDULE } from "../demo";
-import { schedulePath, tenantId } from "../paths";
+import { requireTenantId, schedulePath } from "../paths";
 import { sanitizeForFirestore } from "../sanitize";
 import { normalizeStage, summarizeProjectStages } from "../utils";
 import type { ScheduleItem, ScheduleStatus } from "../types";
@@ -46,7 +46,7 @@ function mapStage(id: string, data: Record<string, unknown>): ScheduleItem {
 }
 
 function resolveWorkspace(workspaceId?: string | null) {
-  return tenantId(workspaceId);
+  return requireTenantId(workspaceId);
 }
 
 export async function listSchedule(

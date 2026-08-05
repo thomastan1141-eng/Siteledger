@@ -53,8 +53,10 @@ export function JournalComposer({
   const [open, setOpen] = useState(!compact);
 
   useEffect(() => {
-    listSchedule(project.id).then(setStages);
-  }, [project.id]);
+    listSchedule(project.id, {
+      workspaceId: project.workspaceId || project.companyId,
+    }).then(setStages);
+  }, [project.id, project.workspaceId, project.companyId]);
 
   useEffect(() => {
     return () => {

@@ -173,17 +173,22 @@ export async function POST(request: Request) {
         .collection(`companies/${COMPANY_ID}/projects`)
         .get();
       const updates = projectsSnap.docs
-        .filter((d) => !d.data().workspaceId)
-        .map((d) =>
-          d.ref.set(
+        .filter((d) => {
+          const data = d.data();
+          return !data.workspaceId || !data.status;
+        })
+        .map((d) => {
+          const data = d.data();
+          return d.ref.set(
             {
-              workspaceId: COMPANY_ID,
-              companyId: COMPANY_ID,
+              workspaceId: data.workspaceId || COMPANY_ID,
+              companyId: data.companyId || COMPANY_ID,
+              status: data.status || "upcoming",
               updatedAt: new Date().toISOString(),
             },
             { merge: true },
-          ),
-        );
+          );
+        });
       await Promise.all(updates);
     }
 

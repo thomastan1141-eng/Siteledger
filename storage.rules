@@ -76,6 +76,16 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
+    // Canonical cover path (same tenant root as other project files)
+    match /companies/{companyId}/projects/{projectId}/cover/{fileName} {
+      allow read: if isStaffSide(companyId)
+        || isWorkspaceMember(companyId)
+        || isClientOnProject(companyId, projectId);
+      allow write: if (isStaffSide(companyId) || isWorkspaceMember(companyId))
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
     match /companies/{companyId}/projects/{projectId}/purchases/{purchaseId}/photos/{fileName} {
       allow read: if isStaffSide(companyId)
         || isWorkspaceMember(companyId)

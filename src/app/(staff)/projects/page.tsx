@@ -30,17 +30,18 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!workspaceId && profile?.role !== "admin" && profile?.role !== "staff") {
+    const ws =
+      workspaceId ||
+      profile?.defaultWorkspaceId ||
+      profile?.companyId ||
+      "";
+    if (!ws) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- no tenant yet
       setLoading(false);
       return;
     }
     listProjects({
-      workspaceId:
-        workspaceId ||
-        profile?.defaultWorkspaceId ||
-        profile?.companyId ||
-        undefined,
+      workspaceId: ws,
       ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
     })
       .then(setProjects)

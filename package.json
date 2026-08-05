@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:rules": "firebase emulators:exec --only firestore,storage \"vitest run tests/rules\"",
+    "backfill:project-status": "tsx scripts/backfill-project-status.ts",
+    "backfill:media-lifecycle": "tsx scripts/backfill-media-lifecycle.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -23,6 +27,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -32,6 +37,8 @@
     "eslint-config-next": "16.2.12",
     "firebase-tools": "^15.25.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.5",
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

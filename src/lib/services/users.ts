@@ -11,9 +11,10 @@ import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_ADMIN, DEMO_CLIENT } from "../demo";
 import {
   accountUserPath,
+  requireTenantId,
   setupMetaPath,
-  usersPath,
   tenantId,
+  usersPath,
 } from "../paths";
 import { sanitizeForFirestore } from "../sanitize";
 import type { AppUser, UserRole } from "../types";
@@ -77,7 +78,7 @@ export async function ensureBootstrapAdmin(input: {
   const existing = await getUserProfile(input.uid);
   if (existing) return existing;
 
-  const setupRef = doc(getFirebaseDb(), setupMetaPath());
+  const setupRef = doc(getFirebaseDb(), setupMetaPath(COMPANY_ID));
   const setupSnap = await getDoc(setupRef);
   if (setupSnap.exists()) {
     return null;
@@ -113,7 +114,7 @@ export async function ensureBootstrapAdmin(input: {
     updatedAt: now,
   });
 
-  await setDoc(doc(getFirebaseDb(), usersPath(), input.uid), payload);
+  await setDoc(doc(getFirebaseDb(), usersPath(COMPANY_ID), input.uid), payload);
   await setDoc(doc(getFirebaseDb(), accountUserPath(input.uid)), payload, {
     merge: true,
   });
@@ -137,7 +138,7 @@ export async function upsertUserProfile(
   },
   workspaceId?: string,
 ) {
-  const ws = tenantId(workspaceId || data.companyId);
+  const ws = requireTenantId(workspaceId || data.companyId);
   const ref = doc(getFirebaseDb(), usersPath(ws), uid);
   const existing = await getDoc(ref);
   const payload = sanitizeForFirestore({
@@ -174,7 +175,7 @@ export async function setClientAccess(
   workspaceId?: string,
 ) {
   if (AUTH_BYPASS) return;
-  const ws = tenantId(workspaceId);
+  const ws = requireTenantId(workspaceId);
   await updateDoc(doc(getFirebaseDb(), usersPath(ws), uid), {
     active,
     updatedAt: new Date().toISOString(),
