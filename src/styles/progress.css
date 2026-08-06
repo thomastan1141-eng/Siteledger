@@ -2697,7 +2697,12 @@ a.site-chip {
   border-bottom: 1px solid var(--site-border);
   vertical-align: top;
   text-align: left;
-  overflow: hidden;
+}
+
+/* The More cell's dropdown menu is an absolutely-positioned popover that
+   must escape the cell/row bounds — never clip it. */
+.site-purchase-table td.site-purchase-more {
+  overflow: visible;
 }
 
 .site-purchase-table th {
