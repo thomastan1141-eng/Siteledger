@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useId, useState } from "react";
+import { FormEvent, useEffect, useId, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   SiteButton,
   SiteField,
@@ -14,10 +15,10 @@ import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace-context";
 import { listProjects } from "@/lib/services/projects";
 import {
-  createInvitation,
   listWorkspaceInvitations,
   revokeInvitation,
   revokeMemberAccess,
+  shareProjectAccess,
   type PendingInvitationSummary,
   type WorkspaceMemberSummary,
 } from "@/lib/services/invites";
@@ -43,20 +44,12 @@ type FormState = {
   permissions: ColleaguePermissions;
 };
 
-type CopyPanel = {
-  inviteUrl: string;
-  email: string;
-  displayName: string;
-  inviteType: InviteType;
-  projectTitle: string;
-};
-
-function emptyForm(): FormState {
+function emptyForm(projectId = ""): FormState {
   return {
     inviteType: "CLIENT",
     inviteeDisplayName: "",
     inviteeEmail: "",
-    projectId: "",
+    projectId,
     colleaguePreset: "VIEW_ONLY",
     permissions: permissionsForPreset("VIEW_ONLY"),
   };
@@ -65,6 +58,7 @@ function emptyForm(): FormState {
 export default function ProjectAccessPage() {
   const { profile } = useAuth();
   const { workspaceId } = useWorkspace();
+  const searchParams = useSearchParams();
   const formKey = useId();
   const [formInstance, setFormInstance] = useState(0);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -76,11 +70,18 @@ export default function ProjectAccessPage() {
   const [busy, setBusy] = useState(false);
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [form, setForm] = useState<FormState>(emptyForm);
-  const [copyPanel, setCopyPanel] = useState<CopyPanel | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [success, setSuccess] = useState("");
+  const initialProjectId = searchParams.get("projectId") || "";
+  const [form, setForm] = useState<FormState>(() =>
+    emptyForm(initialProjectId),
+  );
 
   const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "";
+
+  const filteredMembers = useMemo(() => {
+    if (!form.projectId) return members;
+    return members.filter((m) => m.projectId === form.projectId);
+  }, [members, form.projectId]);
 
   async function reload(tenant: string) {
     const [projectList, invites] = await Promise.all([
@@ -98,6 +99,14 @@ export default function ProjectAccessPage() {
     setLoading(true);
     void reload(ws).finally(() => setLoading(false));
   }, [profile, ws]);
+
+  useEffect(() => {
+    const fromQuery = searchParams.get("projectId") || "";
+    if (!fromQuery) return;
+    setForm((prev) =>
+      prev.projectId === fromQuery ? prev : { ...prev, projectId: fromQuery },
+    );
+  }, [searchParams]);
 
   if (profile?.role !== "admin") {
     return (
@@ -128,35 +137,37 @@ export default function ProjectAccessPage() {
     }));
   }
 
-  function resetForm() {
-    setForm(emptyForm());
+  function resetForm(keepProjectId = true) {
+    setForm(emptyForm(keepProjectId ? form.projectId : ""));
     setFormInstance((n) => n + 1);
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+    setSuccess("");
     if (!ws) {
       setError("Workspace is not ready yet. Refresh the page and try again.");
       return;
     }
     if (!form.projectId) {
-      setError("Select a project before sending an invitation.");
+      setError("Select a project before sharing.");
       return;
     }
-    if (!form.inviteeDisplayName.trim() || !form.inviteeEmail.trim()) {
-      setError("Enter a display name and email.");
+    if (!form.inviteeEmail.trim()) {
+      setError("Enter the registered email address.");
       return;
     }
     setBusy(true);
     try {
-      const result = await createInvitation({
+      const result = await shareProjectAccess({
         workspaceId: ws,
         projectId: form.projectId,
         inviteType: form.inviteType,
         email: form.inviteeEmail,
         displayName: form.inviteeDisplayName,
-        colleaguePreset: form.inviteType === "COLLEAGUE" ? form.colleaguePreset : undefined,
+        colleaguePreset:
+          form.inviteType === "COLLEAGUE" ? form.colleaguePreset : undefined,
         permissions:
           form.inviteType === "COLLEAGUE" && form.colleaguePreset === "CUSTOM"
             ? form.permissions
@@ -165,21 +176,18 @@ export default function ProjectAccessPage() {
       const projectTitle =
         getProjectDisplayTitle(projects.find((p) => p.id === form.projectId)) ||
         "Project";
-      setCopyPanel({
-        inviteUrl: result.inviteUrl,
-        email: result.email,
-        displayName: result.displayName || form.inviteeDisplayName.trim(),
-        inviteType: result.inviteType,
-        projectTitle,
-      });
-      setCopied(false);
-      resetForm();
+      setSuccess(
+        result.alreadyShared
+          ? `${result.email} already has access to ${projectTitle}.`
+          : `Shared ${projectTitle} with ${result.email}. Access is active immediately.`,
+      );
+      resetForm(true);
       await reload(ws);
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "We could not send the invitation. Please try again.",
+          : "We could not share this project. Please try again.",
       );
     } finally {
       setBusy(false);
@@ -188,7 +196,7 @@ export default function ProjectAccessPage() {
 
   async function onRevokeInvitation(invite: PendingInvitationSummary) {
     if (!ws) return;
-    if (!confirm(`Revoke the invitation to ${invite.email}?`)) return;
+    if (!confirm(`Revoke the legacy invitation to ${invite.email}?`)) return;
     setRowBusyId(invite.id);
     try {
       await revokeInvitation({
@@ -208,7 +216,8 @@ export default function ProjectAccessPage() {
 
   async function onRevokeMember(member: WorkspaceMemberSummary) {
     if (!ws) return;
-    if (!confirm(`Revoke access for ${member.displayName || member.email}?`)) return;
+    if (!confirm(`Remove access for ${member.displayName || member.email}?`))
+      return;
     setRowBusyId(member.uid + member.projectId);
     try {
       await revokeMemberAccess({
@@ -224,8 +233,8 @@ export default function ProjectAccessPage() {
     }
   }
 
-  const clients = members.filter((m) => m.memberType === "CLIENT");
-  const colleagues = members.filter(
+  const clients = filteredMembers.filter((m) => m.memberType === "CLIENT");
+  const colleagues = filteredMembers.filter(
     (m) => m.memberType === "COLLEAGUE" || m.memberType === "COMPANY_MEMBER",
   );
 
@@ -234,14 +243,14 @@ export default function ProjectAccessPage() {
       <SitePageHeader
         kicker="ACCESS CONTROL"
         title="Project Access"
-        description="Invite clients or colleagues, assign them to a project, and control their access."
+        description="Share a project with an existing, email-verified SiteLedger account. Access is granted immediately."
       />
 
       {!projects.length ? (
         <section className="site-section" style={{ maxWidth: 560 }}>
           <h2 className="site-section-title">Create a project first</h2>
           <p className="site-section-desc">
-            Invitations must be attached to a project.
+            Sharing must be attached to a project.
           </p>
           <SiteButton href="/projects/new" variant="accent">
             Create project
@@ -270,7 +279,7 @@ export default function ProjectAccessPage() {
             >
               <div>
                 <strong>Client</strong>
-                <span>Invite a homeowner to follow their project.</span>
+                <span>Share with a homeowner for this project only.</span>
               </div>
             </button>
             <button
@@ -282,21 +291,20 @@ export default function ProjectAccessPage() {
             >
               <div>
                 <strong>Colleague</strong>
-                <span>Invite a teammate with configurable permissions.</span>
+                <span>Share with a teammate for this project only.</span>
               </div>
             </button>
           </div>
 
-          <SiteField label="Display name">
+          <SiteField label="Display name (optional)">
             <SiteInput
               name="inviteeDisplayName"
               autoComplete="off"
               value={form.inviteeDisplayName}
               onChange={(e) => set("inviteeDisplayName", e.target.value)}
-              required
             />
           </SiteField>
-          <SiteField label="Email">
+          <SiteField label="Registered email">
             <SiteInput
               type="email"
               name="inviteeEmail"
@@ -335,7 +343,9 @@ export default function ProjectAccessPage() {
                   name="colleaguePreset"
                   autoComplete="off"
                   value={form.colleaguePreset}
-                  onChange={(e) => onPresetChange(e.target.value as ColleaguePreset)}
+                  onChange={(e) =>
+                    onPresetChange(e.target.value as ColleaguePreset)
+                  }
                 >
                   <option value="VIEW_ONLY">View only</option>
                   <option value="UPDATE_PROGRESS">Update progress</option>
@@ -366,6 +376,11 @@ export default function ProjectAccessPage() {
               {error}
             </p>
           ) : null}
+          {success ? (
+            <p style={{ gridColumn: "1 / -1", color: "var(--site-text-secondary)" }}>
+              {success}
+            </p>
+          ) : null}
           <div style={{ gridColumn: "1 / -1" }}>
             <SiteButton
               type="submit"
@@ -373,145 +388,68 @@ export default function ProjectAccessPage() {
               disabled={busy}
               style={{ width: "100%", maxWidth: 280 }}
             >
-              {busy ? "Sending…" : "Send invitation"}
+              {busy ? "Sharing…" : "Share"}
             </SiteButton>
           </div>
         </form>
       )}
 
-      {copyPanel ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(20,22,20,0.45)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 70,
-            padding: 20,
-          }}
-        >
-          <div
-            style={{
-              width: "100%",
-              maxWidth: 440,
-              background: "var(--site-surface, #fff)",
-              border: "1px solid var(--site-border)",
-              borderRadius: 12,
-              padding: 22,
-            }}
-          >
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 650 }}>
-              Invitation sent
-            </h2>
-            <p style={{ margin: "10px 0", fontSize: 14 }}>
-              {copyPanel.displayName} ·{" "}
-              {copyPanel.inviteType === "CLIENT" ? "Client" : "Colleague"} invited to{" "}
-              {copyPanel.projectTitle}
-            </p>
-            <p
-              style={{
-                margin: "0 0 6px",
-                fontSize: 13,
-                color: "var(--site-text-secondary)",
-              }}
-            >
-              Email
-            </p>
-            <p style={{ margin: "0 0 16px", fontWeight: 600 }}>{copyPanel.email}</p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <SiteButton
-                type="button"
-                variant="accent"
-                onClick={() => {
-                  void navigator.clipboard.writeText(copyPanel.inviteUrl);
-                  setCopied(true);
-                }}
-              >
-                {copied ? "Link copied" : "Copy Invitation Link"}
-              </SiteButton>
-              <SiteButton
-                type="button"
-                variant="ghost"
-                onClick={() => setCopyPanel(null)}
-              >
-                Done
-              </SiteButton>
-            </div>
-            <p
-              style={{
-                margin: "14px 0 0",
-                fontSize: 12,
-                color: "var(--site-text-light)",
-              }}
-            >
-              Share this link with {copyPanel.displayName}. It expires in 7 days.
-            </p>
-          </div>
-        </div>
-      ) : null}
-
       <MemberList
         title="Clients"
-        emptyLabel="No clients yet."
+        emptyLabel="No clients shared yet."
         members={clients}
         busyId={rowBusyId}
         onRevoke={onRevokeMember}
       />
       <MemberList
         title="Colleagues"
-        emptyLabel="No colleagues yet."
+        emptyLabel="No colleagues shared yet."
         members={colleagues}
         busyId={rowBusyId}
         onRevoke={onRevokeMember}
       />
 
-      <SiteSection
-        title="Pending invitations"
-        description="Invitations that have not been accepted yet."
-      >
-        {pendingInvitations.map((invite) => (
-          <div
-            key={invite.id}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              padding: "14px 0",
-              borderBottom: "1px solid var(--site-border)",
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 650 }}>
-                {invite.displayName || invite.email}
-              </div>
-              <div style={{ fontSize: 13, color: "var(--site-text-secondary)" }}>
-                {invite.email}
-                <br />
-                {invite.inviteType === "CLIENT" ? "Client" : "Colleague"}
-                {invite.colleaguePreset ? ` · ${invite.colleaguePreset}` : ""} ·{" "}
-                {invite.projectTitle}
-              </div>
-            </div>
-            <SiteButton
-              type="button"
-              variant="ghost"
-              disabled={rowBusyId === invite.id}
-              onClick={() => void onRevokeInvitation(invite)}
+      {pendingInvitations.length ? (
+        <SiteSection
+          title="Legacy pending invitations"
+          description="Old invitation links no longer grant access. Revoke them to clean up."
+        >
+          {pendingInvitations.map((invite) => (
+            <div
+              key={invite.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "14px 0",
+                borderBottom: "1px solid var(--site-border)",
+                flexWrap: "wrap",
+              }}
             >
-              {rowBusyId === invite.id ? "Revoking…" : "Revoke"}
-            </SiteButton>
-          </div>
-        ))}
-        {!pendingInvitations.length ? (
-          <p style={{ color: "var(--site-text-secondary)", fontSize: 14 }}>
-            No pending invitations.
-          </p>
-        ) : null}
-      </SiteSection>
+              <div>
+                <div style={{ fontWeight: 650 }}>
+                  {invite.displayName || invite.email}
+                </div>
+                <div style={{ fontSize: 13, color: "var(--site-text-secondary)" }}>
+                  {invite.email}
+                  <br />
+                  {invite.inviteType === "CLIENT" ? "Client" : "Colleague"}
+                  {invite.colleaguePreset ? ` · ${invite.colleaguePreset}` : ""} ·{" "}
+                  {invite.projectTitle}
+                </div>
+              </div>
+              <SiteButton
+                type="button"
+                variant="ghost"
+                disabled={rowBusyId === invite.id}
+                onClick={() => void onRevokeInvitation(invite)}
+              >
+                {rowBusyId === invite.id ? "Revoking…" : "Revoke"}
+              </SiteButton>
+            </div>
+          ))}
+        </SiteSection>
+      ) : null}
     </div>
   );
 }
@@ -565,7 +503,7 @@ function MemberList({
               disabled={busyId === rowKey}
               onClick={() => void onRevoke(member)}
             >
-              {busyId === rowKey ? "Revoking…" : "Revoke access"}
+              {busyId === rowKey ? "Removing…" : "Remove access"}
             </SiteButton>
           </div>
         );

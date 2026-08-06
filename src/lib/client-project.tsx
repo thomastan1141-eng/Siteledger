@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "./auth-context";
-import { listClientProjects } from "./services/projects";
+import { listClientProjects, workspaceIdsForProfile } from "./services/projects";
 import { listSchedule, summarizeSchedule } from "./services/schedule";
 import { groupUpdatesByDate, listUpdates } from "./services/updates";
 import { listMedia } from "./services/media";
@@ -43,16 +43,17 @@ export function ClientProjectProvider({ children }: { children: ReactNode }) {
 
   async function reload() {
     if (!profile) return;
-    const wsHint =
-      profile.defaultWorkspaceId || profile.companyId || undefined;
-    const projects = await listClientProjects(profile.uid, wsHint);
+    const projects = await listClientProjects(
+      profile.uid,
+      workspaceIdsForProfile(profile),
+    );
     const next = projects[0];
     if (!next) {
       setError("No project is linked to this client account.");
       setProject(null);
       return;
     }
-    const ws = next.workspaceId || next.companyId || wsHint;
+    const ws = next.workspaceId || next.companyId || profile.companyId;
     const [s, u, m] = await Promise.all([
       listSchedule(next.id, { clientOnly: true, workspaceId: ws }),
       listUpdates(next.id, { clientOnly: true, workspaceId: ws }),

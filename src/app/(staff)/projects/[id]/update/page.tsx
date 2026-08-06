@@ -6,7 +6,7 @@ import { JournalComposer } from "@/components/progress/journal-composer";
 import { SitePageHeader, SiteSpinner } from "@/components/progress/primitives";
 import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace-context";
-import { getProject } from "@/lib/services/projects";
+import { getProject, workspaceIdsForProfile } from "@/lib/services/projects";
 import type { Project } from "@/lib/types";
 import { getProjectDisplayName } from "@/lib/utils";
 
@@ -19,12 +19,16 @@ export default function DailyUpdatePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const tenant =
-      workspaceId || profile?.defaultWorkspaceId || profile?.companyId || undefined;
+    const tenant = workspaceIdsForProfile({
+      defaultWorkspaceId:
+        workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "",
+      companyId: profile?.companyId,
+      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
+    });
     getProject(id, tenant)
       .then(setProject)
       .finally(() => setLoading(false));
-  }, [id, workspaceId, profile?.defaultWorkspaceId, profile?.companyId]);
+  }, [id, workspaceId, profile]);
 
   if (loading) return <SiteSpinner />;
   if (!project) {

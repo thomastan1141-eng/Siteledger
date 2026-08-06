@@ -11,7 +11,7 @@ import { BunnyVideoUploader } from "@/components/media/bunny-video-uploader";
 import { ProgressMediaGrid } from "@/components/progress/media-grid";
 import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace-context";
-import { listProjects } from "@/lib/services/projects";
+import { listProjectsAcrossWorkspaces, workspaceIdsForProfile } from "@/lib/services/projects";
 import { listMedia } from "@/lib/services/media";
 import type { MediaItem, Project } from "@/lib/types";
 import { getProjectDisplayName } from "@/lib/utils";
@@ -27,17 +27,25 @@ export default function MediaLibraryPage() {
   const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "";
 
   function reloadMedia() {
-    if (!projectId || !ws) return;
-    listMedia(projectId, { workspaceId: ws }).then(setMedia);
+    const selected = projects.find((p) => p.id === projectId);
+    const tenant =
+      selected?.workspaceId || selected?.companyId || ws;
+    if (!projectId || !tenant) return;
+    listMedia(projectId, { workspaceId: tenant }).then(setMedia);
   }
 
   useEffect(() => {
-    if (!ws) {
+    const ids = workspaceIdsForProfile({
+      defaultWorkspaceId: ws,
+      companyId: profile?.companyId,
+      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
+    });
+    if (!ids.length) {
       setLoading(false);
       return;
     }
-    listProjects({
-      workspaceId: ws,
+    listProjectsAcrossWorkspaces({
+      workspaceIds: ids,
       ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
     }).then((data) => {
       setProjects(data);
@@ -47,9 +55,11 @@ export default function MediaLibraryPage() {
   }, [profile, ws]);
 
   useEffect(() => {
-    if (!projectId || !ws) return;
-    listMedia(projectId, { workspaceId: ws }).then(setMedia);
-  }, [projectId, ws]);
+    const selected = projects.find((p) => p.id === projectId);
+    const tenant = selected?.workspaceId || selected?.companyId || ws;
+    if (!projectId || !tenant) return;
+    listMedia(projectId, { workspaceId: tenant }).then(setMedia);
+  }, [projectId, ws, projects]);
 
   const filtered = media.filter((item) => {
     if (filter === "all") return true;

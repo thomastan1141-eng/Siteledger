@@ -7,35 +7,22 @@ import {
 
 export const runtime = "nodejs";
 
-/**
- * Legacy revoke endpoint — now delegates to atomic unshare when projectId+uid
- * are provided. Full-account disable behaviour is removed.
- */
 export async function POST(request: Request) {
   try {
     const user = await verifyAuthenticatedRequest(request);
     const body = (await request.json()) as Record<string, unknown>;
-    const uid = String(body.uid || "").trim();
     const workspaceId = String(body.workspaceId || "").trim();
     const projectId = String(body.projectId || "").trim();
+    const uid = String(body.uid || "").trim();
 
-    if (!uid || !workspaceId || !projectId) {
-      return NextResponse.json(
-        {
-          error:
-            "Provide workspaceId, projectId and uid. Use /api/access/unshare for project access removal.",
-        },
-        { status: 400 },
-      );
-    }
-
-    await revokeProjectAccess({
+    const result = await revokeProjectAccess({
       actorUid: user.uid,
       workspaceId,
       projectId,
       uid,
     });
-    return NextResponse.json({ ok: true });
+
+    return NextResponse.json(result);
   } catch (err) {
     if (err instanceof ProjectAccessError) {
       return NextResponse.json(

@@ -43,6 +43,12 @@ export async function getUserProfile(uid: string): Promise<AppUser | null> {
       companyId: data.companyId || data.defaultWorkspaceId || COMPANY_ID,
       defaultWorkspaceId:
         data.defaultWorkspaceId || data.companyId || COMPANY_ID,
+      sharedWorkspaceIds: Array.isArray(data.sharedWorkspaceIds)
+        ? data.sharedWorkspaceIds.map(String)
+        : [],
+      projectIds: Array.isArray(data.projectIds)
+        ? data.projectIds.map(String)
+        : [],
     };
   }
 

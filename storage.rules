@@ -9,25 +9,25 @@ service firebase.storage {
       return firestore.get(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid));
     }
 
-    function isWorkspaceMember(workspaceId) {
+    function isWorkspaceOwner(workspaceId) {
       return signedIn()
         && memberDoc(workspaceId).exists
-        && memberDoc(workspaceId).data.status == 'ACTIVE';
-    }
-
-    function projectNotTrashed(companyId, projectId) {
-      return !('status' in projectData(companyId, projectId))
-        || !(projectData(companyId, projectId).status in ['trashed', 'purging']);
+        && memberDoc(workspaceId).data.status == 'ACTIVE'
+        && memberDoc(workspaceId).data.role == 'OWNER';
     }
 
     function companyUserDoc(companyId) {
       return firestore.get(/databases/(default)/documents/companies/$(companyId)/users/$(request.auth.uid));
     }
 
-    function isStaffSide(companyId) {
+    function isCompanyAdmin(companyId) {
       return signedIn()
         && companyUserDoc(companyId).data.active == true
-        && companyUserDoc(companyId).data.role in ['admin', 'staff'];
+        && companyUserDoc(companyId).data.role == 'admin';
+    }
+
+    function isTenantAdmin(companyId) {
+      return isCompanyAdmin(companyId) || isWorkspaceOwner(companyId);
     }
 
     function isClient(companyId) {
@@ -40,9 +40,38 @@ service firebase.storage {
       return firestore.get(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)).data;
     }
 
+    function projectMemberDoc(companyId, projectId) {
+      return firestore.get(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)/members/$(request.auth.uid));
+    }
+
+    function projectNotTrashed(companyId, projectId) {
+      return !('status' in projectData(companyId, projectId))
+        || !(projectData(companyId, projectId).status in ['trashed', 'purging']);
+    }
+
     function isClientOnProject(companyId, projectId) {
       return isClient(companyId)
-        && request.auth.uid in projectData(companyId, projectId).clientUserIds;
+        && request.auth.uid in projectData(companyId, projectId).get('clientUserIds', [])
+        && projectMemberDoc(companyId, projectId).exists
+        && projectMemberDoc(companyId, projectId).data.get('status', '') == 'ACTIVE';
+    }
+
+    function isAssignedStaffOnProject(companyId, projectId) {
+      return signedIn()
+        && request.auth.uid in projectData(companyId, projectId).get('staffIds', [])
+        && projectMemberDoc(companyId, projectId).exists
+        && projectMemberDoc(companyId, projectId).data.get('status', '') == 'ACTIVE';
+    }
+
+    function isProjectCreator(companyId, projectId) {
+      return signedIn()
+        && projectData(companyId, projectId).get('createdBy', '') == request.auth.uid;
+    }
+
+    function canAccessProjectFiles(companyId, projectId) {
+      return isTenantAdmin(companyId)
+        || isProjectCreator(companyId, projectId)
+        || isAssignedStaffOnProject(companyId, projectId);
     }
 
     function canWritePhoto() {
@@ -53,70 +82,64 @@ service firebase.storage {
         );
     }
 
-    // Legacy + tenant paths: companies/{workspaceId}/projects/...
-    // Videos must use Bunny Stream — do not accept new video/* uploads here.
     match /companies/{companyId}/projects/{projectId}/updates/{date}/{folder}/{fileName} {
       allow read: if projectNotTrashed(companyId, projectId)
         && (
-          isStaffSide(companyId)
-          || isWorkspaceMember(companyId)
+          canAccessProjectFiles(companyId, projectId)
           || (isClientOnProject(companyId, projectId) && folder in ['photos', 'handover'])
         );
       allow write: if projectNotTrashed(companyId, projectId)
-        && (isStaffSide(companyId) || isWorkspaceMember(companyId))
+        && canAccessProjectFiles(companyId, projectId)
         && canWritePhoto();
     }
 
     match /companies/{companyId}/projects/{projectId}/3d/{fileName} {
-      allow read: if isStaffSide(companyId)
-        || isWorkspaceMember(companyId)
+      allow read: if canAccessProjectFiles(companyId, projectId)
         || isClientOnProject(companyId, projectId);
-      allow write: if (isStaffSide(companyId) || isWorkspaceMember(companyId))
+      allow write: if canAccessProjectFiles(companyId, projectId)
         && request.resource.size < 50 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
-    // Canonical cover path (same tenant root as other project files)
     match /companies/{companyId}/projects/{projectId}/cover/{fileName} {
-      allow read: if isStaffSide(companyId)
-        || isWorkspaceMember(companyId)
+      allow read: if canAccessProjectFiles(companyId, projectId)
         || isClientOnProject(companyId, projectId);
-      allow write: if (isStaffSide(companyId) || isWorkspaceMember(companyId))
+      allow write: if canAccessProjectFiles(companyId, projectId)
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
     match /companies/{companyId}/projects/{projectId}/purchases/{purchaseId}/photos/{fileName} {
-      allow read: if isStaffSide(companyId)
-        || isWorkspaceMember(companyId)
+      allow read: if canAccessProjectFiles(companyId, projectId)
         || isClientOnProject(companyId, projectId);
-      allow write: if (isStaffSide(companyId)
-          || isWorkspaceMember(companyId)
-          || isClientOnProject(companyId, projectId))
+      allow write: if (
+          canAccessProjectFiles(companyId, projectId)
+          || isClientOnProject(companyId, projectId)
+        )
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
-      allow delete: if isStaffSide(companyId)
-        || isWorkspaceMember(companyId)
+      allow delete: if canAccessProjectFiles(companyId, projectId)
         || isClientOnProject(companyId, projectId);
     }
 
-    // New workspace-scoped cover uploads
     match /workspaces/{workspaceId}/projects/{projectId}/cover/{fileName} {
-      allow read: if isWorkspaceMember(workspaceId) || isStaffSide(workspaceId);
-      allow write: if (isWorkspaceMember(workspaceId) || isStaffSide(workspaceId))
+      allow read: if canAccessProjectFiles(workspaceId, projectId)
+        || isClientOnProject(workspaceId, projectId);
+      allow write: if canAccessProjectFiles(workspaceId, projectId)
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
     match /workspaces/{workspaceId}/projects/{projectId}/journal/{fileName} {
-      allow read: if isWorkspaceMember(workspaceId) || isStaffSide(workspaceId);
-      allow write: if (isWorkspaceMember(workspaceId) || isStaffSide(workspaceId))
+      allow read: if canAccessProjectFiles(workspaceId, projectId);
+      allow write: if canAccessProjectFiles(workspaceId, projectId)
         && canWritePhoto();
     }
 
     match /workspaces/{workspaceId}/projects/{projectId}/purchases/{purchaseId}/{fileName} {
-      allow read: if isWorkspaceMember(workspaceId) || isStaffSide(workspaceId);
-      allow write: if (isWorkspaceMember(workspaceId) || isStaffSide(workspaceId))
+      allow read: if canAccessProjectFiles(workspaceId, projectId)
+        || isClientOnProject(workspaceId, projectId);
+      allow write: if canAccessProjectFiles(workspaceId, projectId)
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }

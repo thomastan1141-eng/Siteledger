@@ -2,7 +2,7 @@ import { getFirebaseAuth } from "../firebase";
 import { AUTH_BYPASS } from "../demo";
 import type { ColleaguePermissions, ColleaguePreset, InviteType } from "../types";
 
-export type CreateInvitationInput = {
+export type ShareProjectInput = {
   workspaceId: string;
   projectId: string;
   inviteType: InviteType;
@@ -12,16 +12,14 @@ export type CreateInvitationInput = {
   permissions?: Partial<ColleaguePermissions>;
 };
 
-export type CreateInvitationResult = {
-  id: string;
-  projectId: string;
-  inviteType: InviteType;
+export type ShareProjectResult = {
+  ok: true;
+  alreadyShared: boolean;
+  uid: string;
   email: string;
-  displayName: string | null;
-  colleaguePreset: ColleaguePreset | null;
-  status: string;
-  expiresAt: string;
-  inviteUrl: string;
+  inviteType: InviteType;
+  projectId: string;
+  workspaceId: string;
 };
 
 export type WorkspaceMemberSummary = {
@@ -64,22 +62,19 @@ async function authedFetch(path: string, body: Record<string, unknown>) {
   });
 }
 
-/** Send a passwordless invitation for a client or colleague on a project. */
-export async function createInvitation(
-  input: CreateInvitationInput,
-): Promise<CreateInvitationResult> {
+/** Share a project immediately with an existing verified SiteLedger account. */
+export async function shareProjectAccess(
+  input: ShareProjectInput,
+): Promise<ShareProjectResult> {
   if (AUTH_BYPASS) {
-    const id = `demo-invite-${Date.now()}`;
     return {
-      id,
-      projectId: input.projectId,
-      inviteType: input.inviteType,
+      ok: true,
+      alreadyShared: false,
+      uid: "demo-share",
       email: input.email.trim(),
-      displayName: input.displayName?.trim() || null,
-      colleaguePreset: input.inviteType === "COLLEAGUE" ? input.colleaguePreset || "VIEW_ONLY" : null,
-      status: "PENDING",
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      inviteUrl: `https://siteledger.work/invite/${id}`,
+      inviteType: input.inviteType,
+      projectId: input.projectId,
+      workspaceId: input.workspaceId,
     };
   }
 
@@ -90,33 +85,53 @@ export async function createInvitation(
     throw new Error("Workspace is required.");
   }
 
-  const res = await authedFetch("/api/invitations/create", {
+  const res = await authedFetch("/api/access/share", {
     workspaceId: input.workspaceId.trim(),
     projectId: input.projectId.trim(),
     inviteType: input.inviteType,
     email: input.email.trim(),
     displayName: input.displayName?.trim() || null,
-    colleaguePreset: input.inviteType === "COLLEAGUE" ? input.colleaguePreset || "VIEW_ONLY" : null,
+    colleaguePreset:
+      input.inviteType === "COLLEAGUE"
+        ? input.colleaguePreset || "VIEW_ONLY"
+        : null,
     permissions:
       input.inviteType === "COLLEAGUE" && input.colleaguePreset === "CUSTOM"
         ? input.permissions
         : null,
   });
 
-  const data = (await res.json()) as {
-    ok?: boolean;
-    invitation?: CreateInvitationResult;
+  const data = (await res.json()) as ShareProjectResult & {
     error?: string;
   };
 
-  if (!res.ok || !data.invitation) {
-    throw new Error(data.error || "We could not send the invitation. Please try again.");
+  if (!res.ok) {
+    throw new Error(data.error || "We could not share this project.");
   }
 
-  return data.invitation;
+  return data;
 }
 
-/** Load active members and pending invitations for the whole workspace. Admins only. */
+/** @deprecated Use shareProjectAccess */
+export async function createInvitation(input: ShareProjectInput) {
+  const result = await shareProjectAccess(input);
+  return {
+    id: result.uid,
+    projectId: result.projectId,
+    inviteType: result.inviteType,
+    email: result.email,
+    displayName: input.displayName?.trim() || null,
+    colleaguePreset:
+      input.inviteType === "COLLEAGUE"
+        ? input.colleaguePreset || "VIEW_ONLY"
+        : null,
+    status: "ACTIVE",
+    expiresAt: "",
+    inviteUrl: "",
+  };
+}
+
+/** Load active members and legacy pending invitations for the workspace. */
 export async function listWorkspaceInvitations(workspaceId: string): Promise<{
   members: WorkspaceMemberSummary[];
   pendingInvitations: PendingInvitationSummary[];
@@ -151,7 +166,7 @@ export async function listWorkspaceInvitations(workspaceId: string): Promise<{
   };
 }
 
-/** Revoke a pending invitation before it is accepted. */
+/** Revoke a legacy pending invitation (migration cleanup). */
 export async function revokeInvitation(input: {
   workspaceId: string;
   projectId: string;
@@ -165,14 +180,14 @@ export async function revokeInvitation(input: {
   }
 }
 
-/** Remove an already-accepted client or colleague from a project. */
+/** Remove shared access immediately. */
 export async function revokeMemberAccess(input: {
   workspaceId: string;
   projectId: string;
   uid: string;
 }) {
   if (AUTH_BYPASS) return;
-  const res = await authedFetch("/api/invitations/revoke", input);
+  const res = await authedFetch("/api/access/unshare", input);
   const data = (await res.json()) as { error?: string };
   if (!res.ok) {
     throw new Error(data.error || "We could not revoke this access.");
@@ -196,4 +211,16 @@ export async function clearMustChangePasswordFlag(workspaceId?: string) {
     const data = (await res.json()) as { error?: string };
     throw new Error(data.error || "We could not update your password status.");
   }
+}
+
+/** Active shared users excluding the project owner membership. */
+export function countSharedUsers(project: {
+  staffIds?: string[] | null;
+  clientUserIds?: string[] | null;
+  createdBy?: string | null;
+}) {
+  const staff = new Set(project.staffIds || []);
+  const clients = new Set(project.clientUserIds || []);
+  if (project.createdBy) staff.delete(project.createdBy);
+  return staff.size + clients.size;
 }

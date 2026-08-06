@@ -121,6 +121,8 @@ export interface AppUser {
   /** Temporary access accounts must change password after first login. */
   mustChangePassword?: boolean;
   projectIds: string[];
+  /** Workspaces where this user has shared project access (discovery index). */
+  sharedWorkspaceIds?: string[];
   createdAt: string;
   updatedAt?: string;
   active: boolean;

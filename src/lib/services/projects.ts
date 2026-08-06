@@ -208,6 +208,55 @@ export async function listProjects(options?: {
   }
 }
 
+/** Resolve home + shared workspaces without mutating defaultWorkspaceId. */
+export function workspaceIdsForProfile(profile?: {
+  defaultWorkspaceId?: string | null;
+  companyId?: string | null;
+  sharedWorkspaceIds?: string[] | null;
+} | null) {
+  return Array.from(
+    new Set(
+      [
+        profile?.defaultWorkspaceId,
+        profile?.companyId,
+        ...(profile?.sharedWorkspaceIds || []),
+      ]
+        .map((v) => String(v || "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+/** List projects across home + shared workspaces for discovery. */
+export async function listProjectsAcrossWorkspaces(options: {
+  workspaceIds: string[];
+  status?: ProjectStatus;
+  staffId?: string;
+}) {
+  const ids = Array.from(
+    new Set(options.workspaceIds.map((id) => id.trim()).filter(Boolean)),
+  );
+  if (!ids.length) return [];
+  const chunks = await Promise.all(
+    ids.map((workspaceId) =>
+      listProjects({
+        workspaceId,
+        status: options.status,
+        staffId: options.staffId,
+      }),
+    ),
+  );
+  const seen = new Set<string>();
+  return sortByUpdatedAtDesc(
+    chunks.flat().filter((p) => {
+      const key = `${p.workspaceId || p.companyId}:${p.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  );
+}
+
 /** Creator-only: list soft-deleted projects. Must filter createdBy for rules. */
 export async function listTrashedProjects(
   workspaceId?: string,
@@ -246,25 +295,29 @@ export async function listTrashedProjects(
 
 export async function listClientProjects(
   clientUid: string,
-  workspaceId?: string,
+  workspaceId?: string | string[],
 ) {
   if (AUTH_BYPASS) {
-    const ws = workspaceId?.trim() || COMPANY_ID;
+    const wsList = Array.isArray(workspaceId)
+      ? workspaceId
+      : [workspaceId?.trim() || COMPANY_ID];
     return demoProjects
       .filter(
         (p) =>
           p.clientUserIds?.includes(clientUid) &&
-          (p.workspaceId || COMPANY_ID) === ws &&
+          wsList.includes(p.workspaceId || COMPANY_ID) &&
           LISTABLE_PROJECT_STATUSES.includes(p.status),
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  // Prefer explicit workspace; otherwise scan company user default via caller.
-  // When workspace omitted, try legacy tenant only as last resort for old clients.
   const candidates = Array.from(
     new Set(
-      [workspaceId?.trim(), LEGACY_TENANT_ID].filter(Boolean) as string[],
+      (
+        Array.isArray(workspaceId)
+          ? workspaceId
+          : [workspaceId?.trim(), LEGACY_TENANT_ID]
+      ).filter(Boolean) as string[],
     ),
   );
 
@@ -282,14 +335,14 @@ export async function listClientProjects(
     } catch (err) {
       console.warn("[listClientProjects]", ws, err);
     }
-    if (all.length && workspaceId?.trim()) break;
   }
 
   const seen = new Set<string>();
   return sortByUpdatedAtDesc(
     all.filter((p) => {
-      if (seen.has(p.id)) return false;
-      seen.add(p.id);
+      const key = `${p.workspaceId || p.companyId}:${p.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     }),
   );
@@ -297,26 +350,32 @@ export async function listClientProjects(
 
 export async function getProject(
   projectId: string,
-  workspaceId?: string,
+  workspaceId?: string | string[],
 ) {
-  const ws = workspaceId?.trim()
-    ? requireTenantId(workspaceId)
-    : resolveTenant(workspaceId);
+  const candidates = Array.from(
+    new Set(
+      (Array.isArray(workspaceId)
+        ? workspaceId
+        : [workspaceId?.trim(), LEGACY_TENANT_ID]
+      )
+        .map((v) => String(v || "").trim())
+        .filter(Boolean),
+    ),
+  );
   if (AUTH_BYPASS) {
     return demoProjects.find((p) => p.id === projectId) || null;
   }
-  const snap = await getDoc(doc(getFirebaseDb(), projectsPath(ws), projectId));
-  if (!snap.exists()) {
-    // Legacy fallback: try default company path once.
-    if (ws !== LEGACY_TENANT_ID) {
-      const legacy = await getDoc(
-        doc(getFirebaseDb(), projectsPath(LEGACY_TENANT_ID), projectId),
+  for (const ws of candidates) {
+    try {
+      const snap = await getDoc(
+        doc(getFirebaseDb(), projectsPath(requireTenantId(ws)), projectId),
       );
-      if (legacy.exists()) return mapProject(legacy.id, legacy.data());
+      if (snap.exists()) return mapProject(snap.id, snap.data());
+    } catch {
+      // try next workspace
     }
-    return null;
   }
-  return mapProject(snap.id, snap.data());
+  return null;
 }
 
 export type CreateProjectResult = {

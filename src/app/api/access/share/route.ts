@@ -2,40 +2,43 @@ import { NextResponse } from "next/server";
 import { verifyAuthenticatedRequest, authErrorResponse } from "@/lib/server/auth";
 import {
   ProjectAccessError,
-  revokeProjectAccess,
+  shareProjectAccess,
 } from "@/lib/server/project-access";
+import type { ColleaguePreset, InviteType } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-/**
- * Legacy revoke endpoint — now delegates to atomic unshare when projectId+uid
- * are provided. Full-account disable behaviour is removed.
- */
 export async function POST(request: Request) {
   try {
     const user = await verifyAuthenticatedRequest(request);
     const body = (await request.json()) as Record<string, unknown>;
-    const uid = String(body.uid || "").trim();
     const workspaceId = String(body.workspaceId || "").trim();
     const projectId = String(body.projectId || "").trim();
+    const email = String(body.email || "").trim();
+    const inviteType = String(body.inviteType || "").toUpperCase() as InviteType;
+    const displayName = body.displayName
+      ? String(body.displayName).trim()
+      : null;
+    const colleaguePreset = body.colleaguePreset
+      ? (String(body.colleaguePreset) as ColleaguePreset)
+      : null;
 
-    if (!uid || !workspaceId || !projectId) {
-      return NextResponse.json(
-        {
-          error:
-            "Provide workspaceId, projectId and uid. Use /api/access/unshare for project access removal.",
-        },
-        { status: 400 },
-      );
-    }
-
-    await revokeProjectAccess({
+    const result = await shareProjectAccess({
       actorUid: user.uid,
       workspaceId,
       projectId,
-      uid,
+      email,
+      inviteType,
+      displayName,
+      colleaguePreset:
+        inviteType === "COLLEAGUE" ? colleaguePreset || "VIEW_ONLY" : null,
+      permissions:
+        inviteType === "COLLEAGUE" && body.permissions
+          ? (body.permissions as Record<string, boolean>)
+          : null,
     });
-    return NextResponse.json({ ok: true });
+
+    return NextResponse.json(result);
   } catch (err) {
     if (err instanceof ProjectAccessError) {
       return NextResponse.json(

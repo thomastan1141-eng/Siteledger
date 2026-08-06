@@ -12,7 +12,8 @@ import {
 import { ForecastPill, ProjectStatusPill } from "@/components/progress/status";
 import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace-context";
-import { listProjects } from "@/lib/services/projects";
+import { listProjectsAcrossWorkspaces, workspaceIdsForProfile } from "@/lib/services/projects";
+import { countSharedUsers } from "@/lib/services/invites";
 import type { Project } from "@/lib/types";
 import {
   formatDate,
@@ -30,18 +31,19 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const ws =
-      workspaceId ||
-      profile?.defaultWorkspaceId ||
-      profile?.companyId ||
-      "";
-    if (!ws) {
+    const ids = workspaceIdsForProfile({
+      defaultWorkspaceId:
+        workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "",
+      companyId: profile?.companyId,
+      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
+    });
+    if (!ids.length) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- no tenant yet
       setLoading(false);
       return;
     }
-    listProjects({
-      workspaceId: ws,
+    listProjectsAcrossWorkspaces({
+      workspaceIds: ids,
       ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
     })
       .then(setProjects)
@@ -76,39 +78,64 @@ export default function ProjectsPage() {
         />
       </div>
 
-      {visible.map((project) => (
-        <Link
-          key={project.id}
-          href={`/projects/${project.id}`}
-          className="site-project-strip"
-        >
-          <div className="site-project-thumb">
-            {project.coverPhotoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={project.coverPhotoUrl} alt="" />
-            ) : null}
-          </div>
-          <div className="site-project-meta">
-            <h3>{getProjectDisplayTitle(project)}</h3>
-            <p>
-              {project.clientName || "No client yet"}
-              {getProjectManagerName(project)
-                ? ` · ${getProjectManagerName(project)}`
-                : ""}
-            </p>
-          </div>
-          <div className="site-project-side">
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {isProjectIncomplete(project) ? <SitePill>Draft</SitePill> : null}
-              <ProjectStatusPill status={project.status} />
-              <ForecastPill status={project.forecastStatus} />
+      {visible.map((project) => {
+        const sharedCount = countSharedUsers(project);
+        return (
+          <div key={project.id} className="site-project-strip">
+            <Link
+              href={`/projects/${project.id}`}
+              className="site-project-thumb"
+              style={{ display: "block" }}
+            >
+              {project.coverPhotoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={project.coverPhotoUrl} alt="" />
+              ) : null}
+            </Link>
+            <Link
+              href={`/projects/${project.id}`}
+              className="site-project-meta"
+              style={{ textDecoration: "none", color: "inherit" }}
+            >
+              <h3>{getProjectDisplayTitle(project)}</h3>
+              <p>
+                {project.clientName || "No client yet"}
+                {getProjectManagerName(project)
+                  ? ` · ${getProjectManagerName(project)}`
+                  : ""}
+              </p>
+            </Link>
+            <div className="site-project-side">
+              <div
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  flexWrap: "wrap",
+                  justifyContent: "flex-end",
+                }}
+              >
+                {isProjectIncomplete(project) ? <SitePill>Draft</SitePill> : null}
+                {sharedCount > 0 ? (
+                  <Link
+                    href={`/access?projectId=${encodeURIComponent(project.id)}`}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ textDecoration: "none" }}
+                  >
+                    <SitePill>
+                      Shared · {sharedCount}
+                    </SitePill>
+                  </Link>
+                ) : null}
+                <ProjectStatusPill status={project.status} />
+                <ForecastPill status={project.forecastStatus} />
+              </div>
+              <span style={{ fontSize: 12, color: "var(--site-text-light)" }}>
+                Due {formatDate(project.forecastCompletionDate)}
+              </span>
             </div>
-            <span style={{ fontSize: 12, color: "var(--site-text-light)" }}>
-              Due {formatDate(project.forecastCompletionDate)}
-            </span>
           </div>
-        </Link>
-      ))}
+        );
+      })}
 
       {!projects.length ? (
         <p style={{ color: "var(--site-text-secondary)" }}>

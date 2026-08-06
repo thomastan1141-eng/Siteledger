@@ -62,18 +62,38 @@ export async function POST(
     const member = await db
       .doc(`companies/${workspaceId}/projects/${projectId}/members/${user.uid}`)
       .get();
-    const mem = member.data();
+    const mem = member.data() || {};
+    const staffIds = Array.isArray(pdata.staffIds)
+      ? pdata.staffIds.map(String)
+      : [];
+    const clientUserIds = Array.isArray(pdata.clientUserIds)
+      ? pdata.clientUserIds.map(String)
+      : [];
     const isCreator = pdata.createdBy === user.uid;
     const isActiveMember =
-      member.exists && String(mem?.status || "") === "ACTIVE";
-    const isClient = isActiveMember && mem?.memberType === "CLIENT";
+      member.exists && String(mem.status || "") === "ACTIVE";
+    const isClient =
+      isActiveMember &&
+      mem.memberType === "CLIENT" &&
+      clientUserIds.includes(user.uid);
     const isColleague =
       isActiveMember &&
-      (mem?.memberType === "COLLEAGUE" ||
-        mem?.memberType === "OWNER" ||
-        mem?.memberType === "COMPANY_MEMBER");
+      staffIds.includes(user.uid) &&
+      (mem.memberType === "COLLEAGUE" ||
+        mem.memberType === "STAFF" ||
+        mem.memberType === "OWNER" ||
+        mem.memberType === "COMPANY_MEMBER");
 
-    if (!isCreator && !isActiveMember) {
+    const companyUser = await db
+      .doc(`companies/${workspaceId}/users/${user.uid}`)
+      .get();
+    const isAdmin =
+      companyUser.exists &&
+      companyUser.data()?.role === "admin" &&
+      companyUser.data()?.active !== false;
+
+    // Dual gate: stale array without ACTIVE member (or vice versa) is denied.
+    if (!isCreator && !isAdmin && !isClient && !isColleague) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -81,17 +101,17 @@ export async function POST(
       if (m.clientVisible !== true) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
-    } else if (!isCreator) {
+    } else if (!isCreator && !isAdmin) {
       const canDownload =
-        mem?.permissions?.downloadMedia === true ||
-        mem?.permissionPreset === "OWNER" ||
-        mem?.permissionPreset === "VIEW_ONLY" ||
-        mem?.permissionPreset === "UPDATE_PROGRESS" ||
-        mem?.permissionPreset === "EDITOR";
-      if (!canDownload && !isColleague) {
+        mem.permissions?.downloadMedia === true ||
+        mem.permissionPreset === "OWNER" ||
+        mem.permissionPreset === "VIEW_ONLY" ||
+        mem.permissionPreset === "UPDATE_PROGRESS" ||
+        mem.permissionPreset === "EDITOR";
+      if (!canDownload) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
-      if (isColleague && mem?.permissions?.downloadMedia === false) {
+      if (mem.permissions?.downloadMedia === false) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
     }

@@ -11,7 +11,7 @@ import {
 import { ForecastPill, ProjectStatusPill } from "@/components/progress/status";
 import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace-context";
-import { listProjects } from "@/lib/services/projects";
+import { listProjectsAcrossWorkspaces, workspaceIdsForProfile } from "@/lib/services/projects";
 import { buildDashboardAlerts } from "@/lib/services/reminders";
 import type { Project } from "@/lib/types";
 import {
@@ -31,19 +31,23 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function load() {
-      const ws =
-        workspaceId ||
-        profile?.defaultWorkspaceId ||
-        profile?.companyId ||
-        "";
-      if (!ws) {
+      const ids = workspaceIdsForProfile({
+        defaultWorkspaceId:
+          workspaceId ||
+          profile?.defaultWorkspaceId ||
+          profile?.companyId ||
+          "",
+        companyId: profile?.companyId,
+        sharedWorkspaceIds: profile?.sharedWorkspaceIds,
+      });
+      if (!ids.length) {
         setLoading(false);
         return;
       }
       setLoading(true);
       try {
-        const all = await listProjects({
-          workspaceId: ws,
+        const all = await listProjectsAcrossWorkspaces({
+          workspaceIds: ids,
           ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
         });
         setProjects(all);

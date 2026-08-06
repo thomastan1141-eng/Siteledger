@@ -65,6 +65,7 @@ export async function GET(request: Request) {
         };
       })
       .filter((m) => m.status !== "REMOVED" && Boolean(m.projectId))
+      .filter((m) => m.memberType !== "OWNER" && m.permissionPreset !== "OWNER")
       .sort((a, b) => (b.acceptedAt || b.invitedAt || "").localeCompare(a.acceptedAt || a.invitedAt || ""));
 
     const pendingInvitations = invitationsSnap.docs

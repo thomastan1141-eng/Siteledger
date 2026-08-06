@@ -14,7 +14,7 @@ import { WeekTimeline } from "@/components/progress/week-timeline";
 import { useAuth } from "@/lib/auth-context";
 import { usePageWidth } from "@/lib/page-width";
 import { useWorkspace } from "@/lib/workspace-context";
-import { getProject } from "@/lib/services/projects";
+import { getProject, workspaceIdsForProfile } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
 import type { Project, ScheduleItem } from "@/lib/types";
 import { getProjectDisplayName } from "@/lib/utils";
@@ -33,18 +33,28 @@ export default function SchedulePage() {
   const [manageOpen, setManageOpen] = useState(false);
 
   useEffect(() => {
-    const tenant =
-      workspaceId || profile?.defaultWorkspaceId || profile?.companyId || undefined;
+    const tenant = workspaceIdsForProfile({
+      defaultWorkspaceId:
+        workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "",
+      companyId: profile?.companyId,
+      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
+    });
     Promise.all([
       getProject(id, tenant),
-      listSchedule(id, { workspaceId: tenant }),
+      // schedule uses resolved project workspace after load
+      Promise.resolve([] as ScheduleItem[]),
     ])
-      .then(([p, s]) => {
+      .then(async ([p]) => {
         setProject(p);
-        setSchedule(s);
+        if (!p) {
+          setSchedule([]);
+          return;
+        }
+        const ws = p.workspaceId || p.companyId || tenant[0];
+        setSchedule(await listSchedule(id, { workspaceId: ws }));
       })
       .finally(() => setLoading(false));
-  }, [id, workspaceId, profile?.defaultWorkspaceId, profile?.companyId]);
+  }, [id, workspaceId, profile]);
 
   if (loading) return <SiteSpinner />;
   if (!project) {

@@ -43,6 +43,7 @@ import {
   getProject,
   markProjectCompleted,
   updateProject,
+  workspaceIdsForProfile,
 } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
 import { groupUpdatesByDate, listUpdates } from "@/lib/services/updates";
@@ -134,11 +135,15 @@ export default function ProjectDetailsPage() {
   });
 
   async function reload() {
-    const tenant =
-      workspaceId || profile?.defaultWorkspaceId || profile?.companyId || undefined;
+    const tenant = workspaceIdsForProfile({
+      defaultWorkspaceId:
+        workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "",
+      companyId: profile?.companyId,
+      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
+    });
     try {
       const p = await getProject(id, tenant);
-      const ws = p?.workspaceId || p?.companyId || tenant;
+      const ws = p?.workspaceId || p?.companyId || tenant[0];
       const [s, u, m] = await Promise.all([
         listSchedule(id, { workspaceId: ws }),
         listUpdates(id, { workspaceId: ws }),
