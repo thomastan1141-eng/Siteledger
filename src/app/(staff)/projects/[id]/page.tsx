@@ -12,7 +12,10 @@ import {
   SiteTextarea,
 } from "@/components/progress/primitives";
 import { SimpleMediaUploader } from "@/components/media/simple-media-uploader";
-import { ProgressMediaGrid } from "@/components/progress/media-grid";
+import {
+  ProgressMediaGrid,
+  type MediaGridSize,
+} from "@/components/progress/media-grid";
 import { ProgressTimeline } from "@/components/progress/timeline";
 import { JournalComposer } from "@/components/progress/journal-composer";
 import { ManageStagesDialog } from "@/components/progress/manage-stages";
@@ -60,6 +63,21 @@ import {
   getProjectManagerName,
 } from "@/lib/utils";
 
+const MEDIA_PHOTO_SIZE_KEY = "siteledger.projectMediaPhotoSize";
+const MEDIA_VIDEO_SIZE_KEY = "siteledger.projectMediaVideoSize";
+const MEDIA_SIZES: MediaGridSize[] = ["small", "medium", "large"];
+const MEDIA_SIZE_LABELS: Record<MediaGridSize, string> = {
+  small: "Small",
+  medium: "Medium",
+  large: "Large",
+};
+
+function readStoredMediaSize(key: string): MediaGridSize {
+  if (typeof window === "undefined") return "small";
+  const stored = window.localStorage.getItem(key);
+  return stored === "medium" || stored === "large" ? stored : "small";
+}
+
 export default function ProjectDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -83,6 +101,19 @@ export default function ProjectDetailsPage() {
   // Overview tab embeds the 12-week timeline + monthly calendar, so it gets
   // the "wide" section width; other tabs (journal/media/settings) stay normal.
   usePageWidth(tab === "overview" ? "wide" : "normal");
+  const [mediaTab, setMediaTab] = useState<"photos" | "videos">("photos");
+  const [photoSize, setPhotoSize] = useState<MediaGridSize>(() =>
+    readStoredMediaSize(MEDIA_PHOTO_SIZE_KEY),
+  );
+  const [videoSize, setVideoSize] = useState<MediaGridSize>(() =>
+    readStoredMediaSize(MEDIA_VIDEO_SIZE_KEY),
+  );
+  useEffect(() => {
+    window.localStorage.setItem(MEDIA_PHOTO_SIZE_KEY, photoSize);
+  }, [photoSize]);
+  useEffect(() => {
+    window.localStorage.setItem(MEDIA_VIDEO_SIZE_KEY, videoSize);
+  }, [videoSize]);
   const [manageStagesOpen, setManageStagesOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
@@ -158,6 +189,14 @@ export default function ProjectDetailsPage() {
     });
     return map;
   }, [media]);
+  const photoMedia = useMemo(
+    () => media.filter((item) => item.type === "photo"),
+    [media],
+  );
+  const videoMedia = useMemo(
+    () => media.filter((item) => item.type === "video"),
+    [media],
+  );
 
   async function saveSettings(e: FormEvent) {
     e.preventDefault();
@@ -462,8 +501,49 @@ export default function ProjectDetailsPage() {
               onUploaded={() => void reload()}
             />
           ) : null}
+
+          <div className="site-filter-rail" role="tablist" aria-label="Media type">
+            <button
+              type="button"
+              className="site-chip"
+              data-active={mediaTab === "photos"}
+              onClick={() => setMediaTab("photos")}
+            >
+              Photos ({photoMedia.length})
+            </button>
+            <button
+              type="button"
+              className="site-chip"
+              data-active={mediaTab === "videos"}
+              onClick={() => setMediaTab("videos")}
+            >
+              Videos ({videoMedia.length})
+            </button>
+          </div>
+
+          <div
+            className="site-timeline-size-toggle"
+            role="group"
+            aria-label="Thumbnail size"
+          >
+            <span className="site-timeline-size-label">Size</span>
+            {MEDIA_SIZES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className="site-chip"
+                data-active={(mediaTab === "photos" ? photoSize : videoSize) === s}
+                onClick={() =>
+                  mediaTab === "photos" ? setPhotoSize(s) : setVideoSize(s)
+                }
+              >
+                {MEDIA_SIZE_LABELS[s]}
+              </button>
+            ))}
+          </div>
+
           <ProgressMediaGrid
-            items={media}
+            items={mediaTab === "photos" ? photoMedia : videoMedia}
             allowDownload
             workspaceId={project.workspaceId || project.companyId}
             canDelete={profile?.role === "admin"}
@@ -472,6 +552,7 @@ export default function ProjectDetailsPage() {
               (profile?.role === "staff" && project.allowStaffPublish)
             }
             onChanged={() => void reload()}
+            size={mediaTab === "photos" ? photoSize : videoSize}
           />
         </div>
       ) : null}

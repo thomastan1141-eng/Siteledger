@@ -209,6 +209,33 @@ export async function updateScheduleItem(
   );
 }
 
+export async function setAllBarColors(
+  projectId: string,
+  itemIds: string[],
+  barColor: string,
+  workspaceId?: string,
+) {
+  const ws = resolveWorkspace(workspaceId);
+  const updatedAt = new Date().toISOString();
+  if (AUTH_BYPASS) {
+    demoSchedule = demoSchedule.map((item) =>
+      item.projectId === projectId && itemIds.includes(item.id)
+        ? { ...item, barColor, updatedAt }
+        : item,
+    );
+    return;
+  }
+
+  const batch = writeBatch(getFirebaseDb());
+  itemIds.forEach((id) => {
+    batch.update(doc(getFirebaseDb(), schedulePath(projectId, ws), id), {
+      barColor,
+      updatedAt,
+    });
+  });
+  await batch.commit();
+}
+
 export async function reorderStages(
   projectId: string,
   orderedIds: string[],

@@ -34,7 +34,7 @@ import {
 } from "@/components/progress/primitives";
 import { useAuth } from "@/lib/auth-context";
 import {
-  calcRmbSgdTotals,
+  calcPurchaseTotals,
   emptyLightingSpecs,
   formatLightingSpecs,
   formatRmb,
@@ -61,6 +61,7 @@ import type {
   LightingSpecifications,
   Project,
   PurchaseCategory,
+  PurchaseCurrency,
   PurchaseItem,
   PurchasePhoto,
   PurchaseResponsibility,
@@ -70,6 +71,7 @@ import {
   DEFAULT_PURCHASE_LOCATIONS,
   DEFAULT_RMB_TO_SGD_RATE,
   PURCHASE_CATEGORY_LABELS,
+  PURCHASE_CURRENCY_LABELS,
   PURCHASE_RESPONSIBILITY_LABELS,
   PURCHASE_STATUS_LABELS,
 } from "@/lib/types";
@@ -100,8 +102,10 @@ function defaultForm(
     lightingSpecifications:
       category === "LIGHTING" ? emptyLightingSpecs() : undefined,
     purchaseResponsibility: asOwner ? "OWNER" : "STUDIO",
+    currency: "RMB",
     quantity: 1,
     unitPriceRMB: 0,
+    unitPriceSGD: 0,
     purchaseStatus: "TO_CONFIRM",
     action: "",
     photos: [],
@@ -392,7 +396,7 @@ export function PurchasesPanel({
                       ) : null}
                       <th>Purchased by</th>
                       <th>Quantity</th>
-                      <th>Unit Price RMB</th>
+                      <th>Unit Price</th>
                       <th>Total RMB</th>
                       <th>Total SGD</th>
                       <th>Status</th>
@@ -471,7 +475,8 @@ export function PurchasesPanel({
                     · Qty {item.quantity}
                   </p>
                   <p>
-                    {formatRmb(item.totalRMB)} · {formatSgd(item.totalSGD)}
+                    {item.currency === "SGD" ? "—" : formatRmb(item.totalRMB)}{" "}
+                    · {formatSgd(item.totalSGD)}
                   </p>
                   <span
                     className="site-purchase-status"
@@ -845,9 +850,12 @@ function PurchaseRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const [actionSaving, setActionSaving] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
-  const live = calcRmbSgdTotals({
+  const isSgd = item.currency === "SGD";
+  const live = calcPurchaseTotals({
+    currency: item.currency,
     quantity: item.quantity,
     unitPriceRMB: item.unitPriceRMB,
+    unitPriceSGD: item.unitPriceSGD,
     rmbToSgdRate: rate,
   });
   const lightingText = formatLightingSpecs(item.lightingSpecifications);
@@ -930,18 +938,26 @@ function PurchaseRow({
             type="number"
             min={0}
             step="any"
-            defaultValue={item.unitPriceRMB}
-            key={`price-${item.id}-${item.unitPriceRMB}`}
+            defaultValue={isSgd ? item.unitPriceSGD : item.unitPriceRMB}
+            key={`price-${item.id}-${isSgd ? item.unitPriceSGD : item.unitPriceRMB}`}
             onBlur={(e) => {
-              const unitPriceRMB = parseMoney(e.target.value);
-              if (unitPriceRMB !== item.unitPriceRMB) onPatch({ unitPriceRMB });
+              const value = parseMoney(e.target.value);
+              if (isSgd) {
+                if (value !== item.unitPriceSGD) {
+                  onPatch({ unitPriceSGD: value });
+                }
+              } else if (value !== item.unitPriceRMB) {
+                onPatch({ unitPriceRMB: value });
+              }
             }}
           />
+        ) : isSgd ? (
+          formatSgd(item.unitPriceSGD)
         ) : (
           formatRmb(item.unitPriceRMB)
         )}
       </td>
-      <td>{formatRmb(live.totalRMB)}</td>
+      <td>{isSgd ? "—" : formatRmb(live.totalRMB)}</td>
       <td>{formatSgd(live.totalSGD)}</td>
       <td>
         {editable ? (
@@ -1398,8 +1414,10 @@ function PurchaseFormSheet({
                 }
               : undefined,
           purchaseResponsibility: initial.purchaseResponsibility,
+          currency: initial.currency,
           quantity: initial.quantity,
           unitPriceRMB: initial.unitPriceRMB,
+          unitPriceSGD: initial.unitPriceSGD,
           purchaseStatus: initial.purchaseStatus,
           action: initial.action,
           photos: [...initialPhotos],
@@ -1412,12 +1430,15 @@ function PurchaseFormSheet({
   const [coverPendingId, setCoverPendingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const totals = calcRmbSgdTotals({
+  const totals = calcPurchaseTotals({
+    currency: form.currency,
     quantity: form.quantity,
     unitPriceRMB: form.unitPriceRMB,
+    unitPriceSGD: form.unitPriceSGD,
     rmbToSgdRate: rate,
   });
   const isLighting = category === "LIGHTING";
+  const isSgd = form.currency === "SGD";
 
   useEffect(() => {
     return () => {
@@ -1672,27 +1693,72 @@ function PurchaseFormSheet({
                 }
               />
             </SiteField>
-            <SiteField label="Unit price RMB">
-              <SiteInput
-                type="number"
-                min={0}
-                step="any"
-                value={form.unitPriceRMB}
+            <SiteField label="Currency">
+              <SiteSelect
+                value={form.currency}
                 onChange={(e) =>
                   setForm((s) => ({
                     ...s,
-                    unitPriceRMB: parseMoney(e.target.value),
+                    currency: e.target.value as PurchaseCurrency,
                   }))
                 }
-              />
+              >
+                <option value="RMB">{PURCHASE_CURRENCY_LABELS.RMB}</option>
+                <option value="SGD">{PURCHASE_CURRENCY_LABELS.SGD}</option>
+              </SiteSelect>
             </SiteField>
+            {isSgd ? (
+              <SiteField label="Unit price SGD">
+                <SiteInput
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={form.unitPriceSGD}
+                  onChange={(e) =>
+                    setForm((s) => ({
+                      ...s,
+                      unitPriceSGD: parseMoney(e.target.value),
+                    }))
+                  }
+                />
+              </SiteField>
+            ) : (
+              <SiteField label="Unit price RMB">
+                <SiteInput
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={form.unitPriceRMB}
+                  onChange={(e) =>
+                    setForm((s) => ({
+                      ...s,
+                      unitPriceRMB: parseMoney(e.target.value),
+                    }))
+                  }
+                />
+              </SiteField>
+            )}
           </div>
           <p className="site-purchase-calc">
-            Total RMB: <strong>{formatRmb(totals.totalRMB)}</strong>
-            {" · "}
-            Total SGD: <strong>{formatSgd(totals.totalSGD)}</strong>
-            {" · "}
-            Rate {rate}
+            {isSgd ? (
+              <>
+                Total SGD: <strong>{formatSgd(totals.totalSGD)}</strong>
+                {" · "}
+                Total RMB: <strong>—</strong>
+              </>
+            ) : (
+              <>
+                Total RMB: <strong>{formatRmb(totals.totalRMB)}</strong>
+                {" · "}
+                Total SGD: <strong>{formatSgd(totals.totalSGD)}</strong>
+              </>
+            )}
+            {isSgd ? null : (
+              <>
+                {" · "}
+                Rate {rate}
+              </>
+            )}
           </p>
           <SiteField label="Action">
             <SiteInput

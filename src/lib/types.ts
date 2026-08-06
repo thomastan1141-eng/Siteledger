@@ -475,6 +475,13 @@ export const VISIBILITY_LABELS: Record<Visibility, string> = {
 
 export type PurchaseResponsibility = "STUDIO" | "OWNER";
 
+/**
+ * Currency the item's price was originally entered in. Existing records
+ * predate this field and must be treated as "RMB" (see mapPurchase in
+ * src/lib/services/purchases.ts).
+ */
+export type PurchaseCurrency = "RMB" | "SGD";
+
 export type PurchaseCategory =
   | "LIGHTING"
   | "KITCHEN_APPLIANCES"
@@ -516,8 +523,14 @@ export interface PurchaseItem {
   /** @deprecated kept for legacy reads — use photos */
   photoUrls?: string[];
   purchaseResponsibility: PurchaseResponsibility;
+  /** Currency the price was entered in. Original entered price is preserved
+   * in unitPriceRMB (currency "RMB") or unitPriceSGD (currency "SGD") —
+   * SGD items are never permanently converted to RMB. */
+  currency: PurchaseCurrency;
   quantity: number;
   unitPriceRMB: number;
+  unitPriceSGD: number;
+  /** 0 for SGD-currency items — display as "—", not $0. */
   totalRMB: number;
   totalSGD: number;
   purchaseStatus: PurchaseStatus;
@@ -547,6 +560,11 @@ export const PURCHASE_RESPONSIBILITY_LABELS: Record<
 > = {
   STUDIO: "Studio",
   OWNER: "Owner",
+};
+
+export const PURCHASE_CURRENCY_LABELS: Record<PurchaseCurrency, string> = {
+  RMB: "RMB (¥)",
+  SGD: "SGD (S$)",
 };
 
 export const DEFAULT_PURCHASE_LOCATIONS = [

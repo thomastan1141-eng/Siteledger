@@ -19,7 +19,7 @@ import { getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { AUTH_BYPASS } from "../demo";
 import { COMPANY_ID } from "../constants";
 import { compressImageFile } from "../image-compress";
-import { calcRmbSgdTotals, roundMoney } from "../money";
+import { calcPurchaseTotals, roundMoney } from "../money";
 import {
   purchasesPath,
   requireTenantId,
@@ -29,6 +29,7 @@ import type {
   AppUser,
   LightingSpecifications,
   PurchaseCategory,
+  PurchaseCurrency,
   PurchaseItem,
   PurchasePhoto,
   PurchaseResponsibility,
@@ -51,8 +52,10 @@ export type PurchaseInput = {
   coverImageUrl?: string;
   photos?: PurchasePhoto[];
   purchaseResponsibility: PurchaseResponsibility;
+  currency: PurchaseCurrency;
   quantity: number;
   unitPriceRMB: number;
+  unitPriceSGD: number;
   purchaseStatus: PurchaseStatus;
   action?: string;
 };
@@ -84,8 +87,10 @@ let demoPurchases: PurchaseItem[] = [
       },
     ],
     purchaseResponsibility: "STUDIO",
+    currency: "RMB",
     quantity: 20,
     unitPriceRMB: 150,
+    unitPriceSGD: 0,
     totalRMB: 3000,
     totalSGD: 570,
     purchaseStatus: "TO_PURCHASE",
@@ -106,8 +111,10 @@ let demoPurchases: PurchaseItem[] = [
     coverImageUrl: "",
     photos: [],
     purchaseResponsibility: "OWNER",
+    currency: "RMB",
     quantity: 2,
     unitPriceRMB: 1650,
+    unitPriceSGD: 0,
     totalRMB: 3300,
     totalSGD: 627,
     purchaseStatus: "TO_CONFIRM",
@@ -128,8 +135,10 @@ let demoPurchases: PurchaseItem[] = [
     coverImageUrl: "",
     photos: [],
     purchaseResponsibility: "STUDIO",
+    currency: "RMB",
     quantity: 1,
     unitPriceRMB: 4200,
+    unitPriceSGD: 0,
     totalRMB: 4200,
     totalSGD: 798,
     purchaseStatus: "TO_PURCHASE",
@@ -265,11 +274,17 @@ export function mapPurchase(
         }))
       : [];
 
+  // Pre-currency-selector records have no `currency` field — treat as RMB
+  // for backward compatibility, per existing unitPriceRMB semantics.
+  const currency: PurchaseCurrency = data.currency === "SGD" ? "SGD" : "RMB";
   const quantity = Number(data.quantity) || 0;
   const unitPriceRMB = Number(data.unitPriceRMB ?? data.unitPrice ?? 0);
-  const totals = calcRmbSgdTotals({
+  const unitPriceSGD = Number(data.unitPriceSGD ?? 0);
+  const totals = calcPurchaseTotals({
+    currency,
     quantity,
     unitPriceRMB,
+    unitPriceSGD,
     rmbToSgdRate,
   });
 
@@ -286,8 +301,10 @@ export function mapPurchase(
     photos,
     purchaseResponsibility:
       (data.purchaseResponsibility as PurchaseResponsibility) || "STUDIO",
+    currency: totals.currency,
     quantity: totals.quantity,
     unitPriceRMB: totals.unitPriceRMB,
+    unitPriceSGD: totals.unitPriceSGD,
     totalRMB: totals.totalRMB,
     totalSGD: totals.totalSGD,
     purchaseStatus: normalizeStatus(data.purchaseStatus),
@@ -363,9 +380,11 @@ export async function createPurchase(
   }
 
   const ws = purchaseWorkspace(user, workspaceId);
-  const totals = calcRmbSgdTotals({
+  const totals = calcPurchaseTotals({
+    currency: input.currency,
     quantity: input.quantity,
     unitPriceRMB: input.unitPriceRMB,
+    unitPriceSGD: input.unitPriceSGD,
     rmbToSgdRate,
   });
   const now = nowIso();
@@ -393,8 +412,10 @@ export async function createPurchase(
     photos,
     purchaseResponsibility:
       user.role === "client" ? "OWNER" : input.purchaseResponsibility,
+    currency: totals.currency,
     quantity: totals.quantity,
     unitPriceRMB: totals.unitPriceRMB,
+    unitPriceSGD: totals.unitPriceSGD,
     totalRMB: totals.totalRMB,
     totalSGD: totals.totalSGD,
     purchaseStatus: input.purchaseStatus,
@@ -439,9 +460,17 @@ export async function updatePurchase(
     throw new Error("Owners cannot change Purchased by to Studio.");
   }
 
+  const currency = patch.currency ?? existing.currency;
   const quantity = patch.quantity ?? existing.quantity;
   const unitPriceRMB = patch.unitPriceRMB ?? existing.unitPriceRMB;
-  const totals = calcRmbSgdTotals({ quantity, unitPriceRMB, rmbToSgdRate });
+  const unitPriceSGD = patch.unitPriceSGD ?? existing.unitPriceSGD;
+  const totals = calcPurchaseTotals({
+    currency,
+    quantity,
+    unitPriceRMB,
+    unitPriceSGD,
+    rmbToSgdRate,
+  });
   const photos = patch.photos ?? existing.photos;
   const category = patch.category ?? existing.category;
   const lightingSpecifications =
@@ -484,8 +513,10 @@ export async function updatePurchase(
       user.role === "client"
         ? ("OWNER" as const)
         : (patch.purchaseResponsibility ?? existing.purchaseResponsibility),
+    currency: totals.currency,
     quantity: totals.quantity,
     unitPriceRMB: totals.unitPriceRMB,
+    unitPriceSGD: totals.unitPriceSGD,
     totalRMB: totals.totalRMB,
     totalSGD: totals.totalSGD,
     purchaseStatus: patch.purchaseStatus ?? existing.purchaseStatus,
@@ -521,6 +552,9 @@ export async function recalculatePurchaseTotals(
   const ws = purchaseWorkspace(user, workspaceId);
   const items = await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws });
   for (const item of items) {
+    // SGD items are entered directly in SGD and never convert off the RMB
+    // rate — leave them completely untouched (no rewrite, no updatedAt bump).
+    if (item.currency === "SGD") continue;
     await updatePurchase(
       projectId,
       item.id,
@@ -604,8 +638,10 @@ export async function duplicatePurchase(
       photos: existing.photos.map((p) => ({ ...p })),
       purchaseResponsibility:
         user.role === "client" ? "OWNER" : existing.purchaseResponsibility,
+      currency: existing.currency,
       quantity: existing.quantity,
       unitPriceRMB: existing.unitPriceRMB,
+      unitPriceSGD: existing.unitPriceSGD,
       purchaseStatus: "TO_CONFIRM",
       action: existing.action,
     },
@@ -768,7 +804,8 @@ export function exportPurchasesCsv(items: PurchaseItem[]) {
     "Cut-out size",
     "Purchased by",
     "Quantity",
-    "Unit Price RMB",
+    "Currency",
+    "Unit Price",
     "Total RMB",
     "Total SGD",
     "Status",
@@ -786,8 +823,9 @@ export function exportPurchasesCsv(items: PurchaseItem[]) {
     item.lightingSpecifications?.cutOutSize || "",
     item.purchaseResponsibility,
     String(item.quantity),
-    String(item.unitPriceRMB),
-    String(item.totalRMB),
+    item.currency,
+    String(item.currency === "SGD" ? item.unitPriceSGD : item.unitPriceRMB),
+    item.currency === "SGD" ? "" : String(item.totalRMB),
     String(item.totalSGD),
     item.purchaseStatus,
     item.action || "",

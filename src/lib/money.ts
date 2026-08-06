@@ -1,5 +1,7 @@
 /** Money helpers — avoid float display errors via cent rounding. */
 
+import type { PurchaseCurrency } from "./types";
+
 export function roundMoney(value: number, decimals = 2) {
   if (!Number.isFinite(value)) return 0;
   const factor = 10 ** decimals;
@@ -14,17 +16,50 @@ export function parseMoney(input: string | number) {
   return Number.isFinite(n) ? roundMoney(n) : 0;
 }
 
-export function calcRmbSgdTotals(input: {
+/**
+ * Currency-aware purchase totals.
+ * - RMB items: user enters unitPriceRMB; totalRMB = qty × unitPriceRMB;
+ *   totalSGD is derived by converting totalRMB at rmbToSgdRate.
+ * - SGD items: user enters unitPriceSGD; totalSGD = qty × unitPriceSGD;
+ *   totalRMB is always 0 (never converted/stored) and unaffected by rate.
+ */
+export function calcPurchaseTotals(input: {
+  currency: PurchaseCurrency;
   quantity: number;
   unitPriceRMB: number;
+  unitPriceSGD: number;
   rmbToSgdRate: number;
 }) {
+  const currency: PurchaseCurrency = input.currency === "SGD" ? "SGD" : "RMB";
   const quantity = Math.max(0, roundMoney(input.quantity, 4));
-  const unitPriceRMB = Math.max(0, roundMoney(input.unitPriceRMB));
   const rmbToSgdRate = Math.max(0, roundMoney(input.rmbToSgdRate, 6));
+
+  if (currency === "SGD") {
+    const unitPriceSGD = Math.max(0, roundMoney(input.unitPriceSGD));
+    const totalSGD = roundMoney(quantity * unitPriceSGD);
+    return {
+      currency,
+      quantity,
+      unitPriceRMB: 0,
+      unitPriceSGD,
+      rmbToSgdRate,
+      totalRMB: 0,
+      totalSGD,
+    };
+  }
+
+  const unitPriceRMB = Math.max(0, roundMoney(input.unitPriceRMB));
   const totalRMB = roundMoney(quantity * unitPriceRMB);
   const totalSGD = roundMoney(totalRMB * rmbToSgdRate);
-  return { quantity, unitPriceRMB, rmbToSgdRate, totalRMB, totalSGD };
+  return {
+    currency,
+    quantity,
+    unitPriceRMB,
+    unitPriceSGD: 0,
+    rmbToSgdRate,
+    totalRMB,
+    totalSGD,
+  };
 }
 
 export function formatRmb(value: number) {

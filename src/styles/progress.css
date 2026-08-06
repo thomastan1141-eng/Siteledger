@@ -1624,7 +1624,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  min-width: 160px;
+  min-width: 200px;
   border-radius: 12px;
   border: 1px solid var(--site-border);
   background: var(--site-surface);
@@ -1654,6 +1654,14 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.site-week-timeline-color-pop-apply-all {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .site-week-timeline-bar[data-color-open="true"] {

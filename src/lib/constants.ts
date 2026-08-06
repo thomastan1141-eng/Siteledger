@@ -73,3 +73,16 @@ export const WORK_ITEM_COLORS = [
 
 export const DEFAULT_WORK_ITEM_COLOR = WORK_ITEM_COLORS[0].value;
 export const STAGE_BAR_COLORS = WORK_ITEM_COLORS;
+
+/**
+ * Original default grey shown on timeline bars that have no saved barColor
+ * (matches --site-border-strong). Kept as its own constant so it can be both
+ * the picker swatch AND the fallback color for legacy stages.
+ */
+export const DEFAULT_STAGE_BAR_COLOR = "#beb9af";
+
+/** Timeline bar color picker options — default grey first, then the palette. */
+export const STAGE_BAR_COLOR_SWATCHES = [
+  { id: "default", label: "Default grey", value: DEFAULT_STAGE_BAR_COLOR },
+  ...STAGE_BAR_COLORS,
+] as const;

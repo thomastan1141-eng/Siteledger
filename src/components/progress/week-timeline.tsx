@@ -10,12 +10,18 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { ArrowDown, ArrowUp, GripVertical, Trash2 } from "lucide-react";
-import { COMMON_STAGE_OPTIONS, STAGE_BAR_COLORS } from "@/lib/constants";
+import {
+  COMMON_STAGE_OPTIONS,
+  DEFAULT_STAGE_BAR_COLOR,
+  STAGE_BAR_COLORS,
+  STAGE_BAR_COLOR_SWATCHES,
+} from "@/lib/constants";
 import {
   createScheduleItem,
   deleteScheduleItem,
   listSchedule,
   reorderStages,
+  setAllBarColors,
   updateScheduleItem,
 } from "@/lib/services/schedule";
 import type { Project, ScheduleItem } from "@/lib/types";
@@ -26,20 +32,9 @@ import {
   weekIndexFromOrigin,
 } from "@/lib/utils";
 
-const STATUS_COLOR: Record<string, string> = {
-  completed: "var(--site-success)",
-  ongoing: "var(--site-accent)",
-  delayed: "var(--site-danger)",
-  on_hold: "var(--site-warning)",
-  not_started: "var(--site-border-strong)",
-};
-
+/** Bars without a saved barColor keep showing the original default grey. */
 function barColorFor(stage: ScheduleItem) {
-  return (
-    stage.barColor ||
-    STATUS_COLOR[stage.status] ||
-    STATUS_COLOR.not_started
-  );
+  return stage.barColor || DEFAULT_STAGE_BAR_COLOR;
 }
 
 const CUSTOM_VALUE = "__custom__";
@@ -89,6 +84,7 @@ export function WeekTimeline({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [colorPickerId, setColorPickerId] = useState<string | null>(null);
+  const [applyingAllColor, setApplyingAllColor] = useState(false);
   const [dragRowId, setDragRowId] = useState<string | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const liveRangeRef = useRef<Record<string, Range>>({});
@@ -189,6 +185,24 @@ export function WeekTimeline({
       await refresh();
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function applyColorToAll(barColor: string) {
+    if (!localStages.length) return;
+    setApplyingAllColor(true);
+    try {
+      await setAllBarColors(
+        project.id,
+        localStages.map((s) => s.id),
+        barColor,
+        workspaceId,
+      );
+      setLocalStages((prev) => prev.map((s) => ({ ...s, barColor })));
+      setColorPickerId(null);
+      await refresh();
+    } finally {
+      setApplyingAllColor(false);
     }
   }
 
@@ -640,8 +654,8 @@ export function WeekTimeline({
                           Color
                         </span>
                         <div className="site-week-timeline-color-pop-swatches">
-                          {STAGE_BAR_COLORS.map((swatch) => {
-                            const active = stage.barColor === swatch.value;
+                          {STAGE_BAR_COLOR_SWATCHES.map((swatch) => {
+                            const active = barColorFor(stage) === swatch.value;
                             return (
                               <button
                                 key={swatch.id}
@@ -652,7 +666,7 @@ export function WeekTimeline({
                                 title={swatch.label}
                                 aria-label={swatch.label}
                                 aria-pressed={active}
-                                disabled={savingId === stage.id}
+                                disabled={savingId === stage.id || applyingAllColor}
                                 onClick={() =>
                                   void setBarColor(stage, swatch.value)
                                 }
@@ -660,6 +674,18 @@ export function WeekTimeline({
                             );
                           })}
                         </div>
+                        <button
+                          type="button"
+                          className="site-chip site-week-timeline-color-pop-apply-all"
+                          disabled={savingId === stage.id || applyingAllColor}
+                          onClick={() =>
+                            void applyColorToAll(barColorFor(stage))
+                          }
+                        >
+                          {applyingAllColor
+                            ? "Applying to all bars…"
+                            : "Apply to all bars"}
+                        </button>
                       </div>
                     ) : null}
                   </div>
