@@ -2697,12 +2697,7 @@ a.site-chip {
   border-bottom: 1px solid var(--site-border);
   vertical-align: top;
   text-align: left;
-}
-
-/* The More cell's dropdown menu is an absolutely-positioned popover that
-   must escape the cell/row bounds — never clip it. */
-.site-purchase-table td.site-purchase-more {
-  overflow: visible;
+  overflow: hidden;
 }
 
 .site-purchase-table th {
@@ -2822,15 +2817,13 @@ a.site-chip {
   color: var(--site-danger);
 }
 
-.site-purchase-more {
-  position: relative;
-}
-
+/* .site-purchase-menu is rendered through a React Portal into document.body
+   (see ActionMenu in purchases-panel.tsx), so its position is set inline as
+   `position: fixed` with computed top/left. It intentionally lives outside
+   the table's DOM/stacking context so it can never be clipped by the table's
+   cell/row overflow or the horizontal scroll wrapper. */
 .site-purchase-menu {
-  position: absolute;
-  right: 8px;
-  top: 36px;
-  z-index: 5;
+  z-index: 60;
   min-width: 140px;
   display: grid;
   background: var(--site-surface);

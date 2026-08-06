@@ -4,10 +4,13 @@ import {
   FormEvent,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -725,6 +728,98 @@ function LocationSummary({ locations }: { locations: string[] }) {
   );
 }
 
+/**
+ * Renders dropdown/menu content through a Portal into document.body,
+ * positioned relative to `anchorRef` (fixed positioning, viewport-relative).
+ * This keeps the menu completely outside the table's DOM subtree so it can
+ * never be clipped by table/row/cell overflow or the horizontal scroll
+ * container, and never affects table width or row height.
+ */
+function ActionMenu({
+  anchorRef,
+  onClose,
+  align = "end",
+  children,
+}: {
+  anchorRef: RefObject<HTMLElement | null>;
+  onClose: () => void;
+  align?: "start" | "end";
+  children: ReactNode;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(
+    null,
+  );
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const menu = menuRef.current;
+    if (!anchor || !menu) return;
+    const rect = anchor.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const width = menuRect.width || 160;
+    const height = menuRect.height || 120;
+    const gap = 6;
+
+    const rawLeft = align === "end" ? rect.right - width : rect.left;
+    const left = Math.min(
+      Math.max(12, rawLeft),
+      Math.max(12, window.innerWidth - width - 12),
+    );
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < height + gap + 12 && rect.top > height + gap + 12;
+    const top = openUp
+      ? Math.max(12, rect.top - height - gap)
+      : Math.min(rect.bottom + gap, Math.max(12, window.innerHeight - height - 12));
+
+    setCoords({ top, left });
+  }, [anchorRef, align]);
+
+  useEffect(() => {
+    function onDocMouseDown(e: MouseEvent) {
+      const t = e.target as Node;
+      if (anchorRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      onClose();
+    }
+    function onKeyDown(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    function onScroll() {
+      onClose();
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onClose);
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [anchorRef, onClose]);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="site-purchase-menu"
+      style={{
+        position: "fixed",
+        top: coords ? coords.top : -9999,
+        left: coords ? coords.left : -9999,
+        visibility: coords ? "visible" : "hidden",
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
 function PurchaseRow({
   item,
   showLightingSpecs,
@@ -749,6 +844,7 @@ function PurchaseRow({
   const editable = canManagePurchase(user, item);
   const [menuOpen, setMenuOpen] = useState(false);
   const [actionSaving, setActionSaving] = useState(false);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
   const live = calcRmbSgdTotals({
     quantity: item.quantity,
     unitPriceRMB: item.unitPriceRMB,
@@ -903,15 +999,21 @@ function PurchaseRow({
       </td>
       <td className="site-purchase-more">
         <button
+          ref={moreButtonRef}
           type="button"
           className="site-chip"
           onClick={() => setMenuOpen((o) => !o)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
           aria-label="More"
         >
           <MoreHorizontal size={14} />
         </button>
         {menuOpen ? (
-          <div className="site-purchase-menu">
+          <ActionMenu
+            anchorRef={moreButtonRef}
+            onClose={() => setMenuOpen(false)}
+          >
             {editable ? (
               <button
                 type="button"
@@ -954,7 +1056,7 @@ function PurchaseRow({
             >
               View photos
             </button>
-          </div>
+          </ActionMenu>
         ) : null}
       </td>
     </tr>
