@@ -131,12 +131,12 @@ export async function createInvitation(input: ShareProjectInput) {
   };
 }
 
-/** Load active members and legacy pending invitations for the workspace. */
-export async function listWorkspaceInvitations(workspaceId: string): Promise<{
+/** Load active members and legacy pending invitations for Projects the current USER created. */
+export async function listWorkspaceInvitations(): Promise<{
   members: WorkspaceMemberSummary[];
   pendingInvitations: PendingInvitationSummary[];
 }> {
-  if (AUTH_BYPASS || !workspaceId.trim()) {
+  if (AUTH_BYPASS) {
     return { members: [], pendingInvitations: [] };
   }
 
@@ -144,10 +144,9 @@ export async function listWorkspaceInvitations(workspaceId: string): Promise<{
   if (!current) throw new Error("Please sign in again.");
   const token = await current.getIdToken();
 
-  const res = await fetch(
-    `/api/invitations/list?workspaceId=${encodeURIComponent(workspaceId.trim())}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
+  const res = await fetch("/api/invitations/list", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
 
   const data = (await res.json()) as {
     ok?: boolean;

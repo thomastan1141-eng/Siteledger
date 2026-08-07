@@ -61,7 +61,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const currentProfile = profile;
     const id =
       currentProfile?.defaultWorkspaceId || currentProfile?.companyId || null;
-    if (!currentProfile || !id || currentProfile.role === "client") {
+    if (!currentProfile || !id) {
       setWorkspace(null);
       setMembership(null);
       setLoading(false);
@@ -75,10 +75,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         getWorkspaceMember(id, currentProfile.uid),
       ]);
 
-      // Soft migrate legacy admins who have a company profile but no workspace yet.
+      // Soft migrate any verified USER who has an account but no workspace
+      // yet. Every account gets a personal workspace — this never depends
+      // on users/{uid}.role.
       if (
         (!ws || !member) &&
-        currentProfile.role === "admin" &&
         getFirebaseAuth().currentUser?.emailVerified
       ) {
         try {

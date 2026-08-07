@@ -17,6 +17,7 @@ import {
 import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_PROJECTS } from "../demo";
+import { OWNER_PERMISSIONS } from "../permissions";
 import {
   LEGACY_TENANT_ID,
   LISTABLE_PROJECT_STATUSES,
@@ -33,6 +34,7 @@ import {
 } from "../sanitize";
 import { deriveForecastStatus, isImageFile } from "../utils";
 import type {
+  ColleaguePermissions,
   ForecastStatus,
   Project,
   Project3DImage,
@@ -143,6 +145,8 @@ function listableStatuses(filter?: ProjectStatus): ProjectStatus[] {
 export async function listProjects(options?: {
   status?: ProjectStatus;
   staffId?: string;
+  /** Rules-safe owner discovery: createdBy == uid + listable status. */
+  createdByUid?: string;
   workspaceId?: string;
 }) {
   const ws = requireTenantId(
@@ -155,6 +159,9 @@ export async function listProjects(options?: {
       .filter((p) => (p.workspaceId || COMPANY_ID) === ws)
       .filter((p) => statuses.includes(p.status))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    if (options?.createdByUid) {
+      projects = projects.filter((p) => p.createdBy === options.createdByUid);
+    }
     if (options?.staffId) {
       projects = projects.filter(
         (p) =>
@@ -167,7 +174,21 @@ export async function listProjects(options?: {
 
   const col = collection(getFirebaseDb(), projectsPath(ws));
 
-  // Staff: constrain assignment + listable status so Rules can authorize the query.
+  if (options?.createdByUid) {
+    const ownedQuery = query(
+      col,
+      where("createdBy", "==", options.createdByUid),
+      where("status", "in", statuses),
+    );
+    const snap = await getDocs(ownedQuery);
+    return sortByUpdatedAtDesc(
+      snap.docs
+        .map((d) => mapProject(d.id, d.data()))
+        .filter((p) => (p.workspaceId || p.companyId || COMPANY_ID) === ws),
+    );
+  }
+
+  // Colleague index: staffIds + listable status (Rules-authorizable).
   if (options?.staffId) {
     const staffQuery = query(
       col,
@@ -182,7 +203,7 @@ export async function listProjects(options?: {
     );
   }
 
-  // Exclude trashed/purging in the query (not only client-side) for Rules safety.
+  // Company-admin full list for one tenant (caller must be company admin).
   const q = query(
     col,
     where("workspaceId", "==", ws),
@@ -227,34 +248,96 @@ export function workspaceIdsForProfile(profile?: {
   );
 }
 
-/** List projects across home + shared workspaces for discovery. */
-export async function listProjectsAcrossWorkspaces(options: {
-  workspaceIds: string[];
-  status?: ProjectStatus;
-  staffId?: string;
-}) {
-  const ids = Array.from(
-    new Set(options.workspaceIds.map((id) => id.trim()).filter(Boolean)),
-  );
-  if (!ids.length) return [];
-  const chunks = await Promise.all(
-    ids.map((workspaceId) =>
-      listProjects({
-        workspaceId,
-        status: options.status,
-        staffId: options.staffId,
-      }),
-    ),
-  );
-  const seen = new Set<string>();
-  return sortByUpdatedAtDesc(
-    chunks.flat().filter((p) => {
-      const key = `${p.workspaceId || p.companyId}:${p.id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }),
-  );
+/** Project with USER-scoped discovery metadata (owner flag + shared count). */
+export type MyProject = Project & {
+  isOwner?: boolean;
+  sharedActiveCount?: number;
+  memberType?: string | null;
+  permissionPreset?: string | null;
+  /** Normalized permission map — see resolveEffectivePermissions on the server. */
+  effectivePermissions?: ColleaguePermissions | null;
+};
+
+/**
+ * Server-authenticated Project discovery for the signed-in USER: everything
+ * they created, merged with everything they hold an ACTIVE membership for.
+ * Never uses users/{uid}.role, company admin or workspace owner status —
+ * see GET /api/projects/list and src/lib/server/project-directory.ts.
+ */
+export async function fetchMyProjects(): Promise<MyProject[]> {
+  if (AUTH_BYPASS) {
+    return [...demoProjects].sort((a, b) =>
+      b.updatedAt.localeCompare(a.updatedAt),
+    );
+  }
+  const current = getFirebaseAuth().currentUser;
+  if (!current) return [];
+  const token = await current.getIdToken();
+  const res = await fetch("/api/projects/list", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = (await res.json()) as { projects?: MyProject[]; error?: string };
+  if (!res.ok) {
+    throw new Error(data.error || "We could not load your projects.");
+  }
+  return data.projects || [];
+}
+
+export type ResolvedProject = {
+  workspaceId: string;
+  project: Project;
+  isOwner: boolean;
+  /** UI-hint only — Firestore/Storage Rules and server APIs re-check the
+   *  member doc themselves; never trust this for authorization decisions. */
+  memberType: string | null;
+  permissionPreset: string | null;
+  /** Normalized permission map for UI gating — see resolveEffectivePermissions
+   *  on the server. Servers/Rules independently re-enforce every write. */
+  effectivePermissions: ColleaguePermissions | null;
+};
+
+/**
+ * Resolve a single Project by id for the signed-in USER, returning its real
+ * workspaceId. Never assumes the caller's defaultWorkspaceId — required for
+ * shared Projects living in another USER's workspace.
+ */
+export async function fetchProjectResolve(
+  projectId: string,
+  workspaceIdHint?: string,
+): Promise<ResolvedProject | null> {
+  if (AUTH_BYPASS) {
+    const project = demoProjects.find((p) => p.id === projectId) || null;
+    if (!project) return null;
+    return {
+      workspaceId: project.workspaceId || COMPANY_ID,
+      project,
+      isOwner: true,
+      memberType: "OWNER",
+      permissionPreset: "OWNER",
+      effectivePermissions: { ...OWNER_PERMISSIONS },
+    };
+  }
+  const current = getFirebaseAuth().currentUser;
+  if (!current) return null;
+  const token = await current.getIdToken();
+  const params = new URLSearchParams({ projectId });
+  if (workspaceIdHint) params.set("workspaceId", workspaceIdHint);
+  const res = await fetch(`/api/projects/resolve?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) return null;
+  const data = (await res.json()) as ResolvedProject & { error?: string };
+  if (!res.ok) {
+    throw new Error(data.error || "We could not load this project.");
+  }
+  return {
+    workspaceId: data.workspaceId,
+    project: data.project,
+    isOwner: data.isOwner,
+    memberType: data.memberType ?? null,
+    permissionPreset: data.permissionPreset ?? null,
+    effectivePermissions: data.effectivePermissions ?? null,
+  };
 }
 
 /** Creator-only: list soft-deleted projects. Must filter createdBy for rules. */

@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebase-admin";
-import { createEmbedPlayback } from "@/lib/bunny/server";
+import {
+  createEmbedPlayback,
+  createSignedCdnUrl,
+} from "@/lib/bunny/server";
 import { authErrorResponse, verifyAuthenticatedRequest } from "@/lib/server/auth";
-import { assertProjectPermission } from "@/lib/server/project-permissions";
+import {
+  assertProjectPermission,
+  isMediaClientVisible,
+} from "@/lib/server/project-permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,11 +63,7 @@ export async function GET(
       );
     }
     if (ctx.role === "client") {
-      const visible =
-        data.clientVisible === true ||
-        data.visibility === "client_visible" ||
-        data.visibility === "handover";
-      if (!visible) {
+      if (!isMediaClientVisible(data)) {
         return NextResponse.json(
           { error: "You do not have access to this video." },
           { status: 403 },
@@ -76,7 +78,21 @@ export async function GET(
     }
 
     const playback = createEmbedPlayback(String(data.bunnyVideoId), 300);
-    return NextResponse.json(playback);
+    let thumbnailUrl: string | null = null;
+    try {
+      const thumbnailName = String(
+        data.thumbnailFileName || "thumbnail.jpg",
+      );
+      thumbnailUrl = createSignedCdnUrl(
+        `${data.bunnyVideoId}/${thumbnailName}`,
+        300,
+      ).url;
+    } catch {
+      // CDN token auth is required for direct assets, but an absent key must
+      // not break the separately signed embed player.
+      thumbnailUrl = null;
+    }
+    return NextResponse.json({ ...playback, thumbnailUrl });
   } catch (err) {
     const auth = authErrorResponse(err);
     if (auth.status === 401 || auth.status === 403) {

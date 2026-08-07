@@ -86,12 +86,6 @@ export default function NewProjectPage() {
     setFormInstance((n) => n + 1);
   }, []);
 
-  useEffect(() => {
-    if (profile?.role !== "admin") {
-      router.replace("/projects");
-    }
-  }, [profile, router]);
-
   function resetAll() {
     setForm(emptyForm());
     setSelectedPresets([]);

@@ -10,8 +10,7 @@ import {
 } from "@/components/progress/primitives";
 import { ForecastPill, ProjectStatusPill } from "@/components/progress/status";
 import { useAuth } from "@/lib/auth-context";
-import { useWorkspace } from "@/lib/workspace-context";
-import { listProjectsAcrossWorkspaces, workspaceIdsForProfile } from "@/lib/services/projects";
+import { fetchMyProjects } from "@/lib/services/projects";
 import { buildDashboardAlerts } from "@/lib/services/reminders";
 import type { Project } from "@/lib/types";
 import {
@@ -22,7 +21,6 @@ import {
 
 export default function DashboardPage() {
   const { profile } = useAuth();
-  const { workspaceId } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [alerts, setAlerts] = useState<
     Awaited<ReturnType<typeof buildDashboardAlerts>>
@@ -30,34 +28,31 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function load() {
-      const ids = workspaceIdsForProfile({
-        defaultWorkspaceId:
-          workspaceId ||
-          profile?.defaultWorkspaceId ||
-          profile?.companyId ||
-          "",
-        companyId: profile?.companyId,
-        sharedWorkspaceIds: profile?.sharedWorkspaceIds,
-      });
-      if (!ids.length) {
-        setLoading(false);
-        return;
-      }
+    if (!profile?.uid) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
       setLoading(true);
       try {
-        const all = await listProjectsAcrossWorkspaces({
-          workspaceIds: ids,
-          ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
-        });
+        const all = await fetchMyProjects();
+        if (cancelled) return;
         setProjects(all);
         setAlerts(await buildDashboardAlerts(all));
+      } catch {
+        if (!cancelled) {
+          setProjects([]);
+          setAlerts([]);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    }
-    load();
-  }, [profile, workspaceId]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.uid]);
 
   if (loading) return <SiteSpinner />;
 

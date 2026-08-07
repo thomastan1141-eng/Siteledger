@@ -44,13 +44,19 @@ export function ProjectChrome({
   activeTab,
   onTabChange,
   actions,
+  hiddenTabs,
 }: {
   project: Project;
   activeTab: ProjectTabKey;
   /** When provided, local tabs use callbacks (main project page). Otherwise links. */
   onTabChange?: (tab: ProjectTabKey) => void;
   actions?: React.ReactNode;
+  /** Tabs to omit entirely — e.g. "settings" for a Client-type member. */
+  hiddenTabs?: ProjectTabKey[];
 }) {
+  const visibleTabs = hiddenTabs?.length
+    ? TABS.filter((t) => !hiddenTabs.includes(t.key))
+    : TABS;
   return (
     <>
       <SitePageHeader
@@ -73,7 +79,7 @@ export function ProjectChrome({
       </div>
 
       <div className="site-filter-rail">
-        {TABS.map((tab) => {
+        {visibleTabs.map((tab) => {
           const active = activeTab === tab.key;
           if (onTabChange && tab.key !== "purchases") {
             return (

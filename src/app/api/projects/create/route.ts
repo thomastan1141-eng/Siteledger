@@ -21,6 +21,9 @@ function optionalString(value: unknown): string | null {
 export async function POST(request: Request) {
   try {
     const user = await verifyAuthenticatedRequest(request);
+    if (!user.emailVerified) {
+      return NextResponse.json({ error: "Email not verified." }, { status: 403 });
+    }
     const body = (await request.json()) as Record<string, unknown>;
     const workspaceId = optionalString(body.workspaceId);
     const clientRequestId = optionalString(body.clientRequestId);
@@ -38,21 +41,17 @@ export async function POST(request: Request) {
     }
 
     const db = getAdminDb();
-    const account = await db.doc(`users/${user.uid}`).get();
+    // Every verified USER may create a Project in their own workspace.
+    // Company admin / users.role never grant this — only ACTIVE workspace
+    // membership (created for every USER during onboarding).
+    const [member, account] = await Promise.all([
+      db.doc(`workspaces/${workspaceId}/members/${user.uid}`).get(),
+      db.doc(`users/${user.uid}`).get(),
+    ]);
     const accountData = account.data() || {};
-    const isAdmin =
-      accountData.active === true &&
-      accountData.role === "admin" &&
-      (accountData.defaultWorkspaceId === workspaceId ||
-        accountData.companyId === workspaceId);
-    const member = await db
-      .doc(`workspaces/${workspaceId}/members/${user.uid}`)
-      .get();
-    const isOwner =
-      member.exists &&
-      member.data()?.status === "ACTIVE" &&
-      member.data()?.role === "OWNER";
-    if (!isAdmin && !isOwner) {
+    const isWorkspaceMember =
+      member.exists && member.data()?.status === "ACTIVE";
+    if (!isWorkspaceMember) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

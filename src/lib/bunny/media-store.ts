@@ -149,7 +149,7 @@ export function bunnyDetailsToPatch(
     width: details.width,
     height: details.height,
     storageSizeBytes: details.storageSize,
-    thumbnailUrl: details.thumbnailUrl,
+    thumbnailUrl: null,
     thumbnailBlurhash: details.thumbnailBlurhash,
     availableResolutions: details.availableResolutions,
     errorCode: status === "FAILED" ? "BUNNY_PROCESSING_FAILED" : null,

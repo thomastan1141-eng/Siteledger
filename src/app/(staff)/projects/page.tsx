@@ -11,10 +11,8 @@ import {
 } from "@/components/progress/primitives";
 import { ForecastPill, ProjectStatusPill } from "@/components/progress/status";
 import { useAuth } from "@/lib/auth-context";
-import { useWorkspace } from "@/lib/workspace-context";
-import { listProjectsAcrossWorkspaces, workspaceIdsForProfile } from "@/lib/services/projects";
+import { fetchMyProjects, type MyProject } from "@/lib/services/projects";
 import { countSharedUsers } from "@/lib/services/invites";
-import type { Project } from "@/lib/types";
 import {
   formatDate,
   getProjectDisplayTitle,
@@ -25,30 +23,31 @@ import {
 
 export default function ProjectsPage() {
   const { profile } = useAuth();
-  const { workspaceId } = useWorkspace();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<MyProject[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const ids = workspaceIdsForProfile({
-      defaultWorkspaceId:
-        workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "",
-      companyId: profile?.companyId,
-      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
-    });
-    if (!ids.length) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- no tenant yet
+    if (!profile?.uid) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- no account yet
       setLoading(false);
       return;
     }
-    listProjectsAcrossWorkspaces({
-      workspaceIds: ids,
-      ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
-    })
-      .then(setProjects)
-      .finally(() => setLoading(false));
-  }, [profile, workspaceId]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchMyProjects();
+        if (!cancelled) setProjects(data);
+      } catch {
+        if (!cancelled) setProjects([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.uid]);
 
   if (loading) return <SiteSpinner />;
 
@@ -61,7 +60,7 @@ export default function ProjectsPage() {
         title="Projects"
         description="Every renovation site as a living progress journal."
         action={
-          profile?.role === "admin" ? (
+          profile?.uid ? (
             <SiteButton href="/projects/new" variant="accent">
               New project
             </SiteButton>
@@ -79,7 +78,10 @@ export default function ProjectsPage() {
       </div>
 
       {visible.map((project) => {
-        const sharedCount = countSharedUsers(project);
+        // Shared indicator is only meaningful for Projects the USER created.
+        const sharedCount = project.isOwner
+          ? (project.sharedActiveCount ?? countSharedUsers(project))
+          : 0;
         return (
           <div key={project.id} className="site-project-strip">
             <Link

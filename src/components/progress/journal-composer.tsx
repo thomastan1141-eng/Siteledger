@@ -33,10 +33,16 @@ export function JournalComposer({
   project,
   onPublished,
   compact = false,
+  canPublishToClient = false,
 }: {
   project: Project;
   onPublished?: () => void | Promise<void>;
   compact?: boolean;
+  /** Creator, or a colleague whose effectivePermissions grant
+   *  publishMediaToClient AND the Project allows staff publish — never a
+   *  bare project.allowStaffPublish check, which would let e.g. a
+   *  VIEW_ONLY/UPDATE_PROGRESS colleague publish to the client. */
+  canPublishToClient?: boolean;
 }) {
   const { profile } = useAuth();
   const [date, setDate] = useState(todayKey());
@@ -58,11 +64,11 @@ export function JournalComposer({
 
   const visibilityOptions = useMemo(() => {
     const options: Visibility[] = ["internal", "pending_approval"];
-    if (profile?.role === "admin" || project.allowStaffPublish) {
+    if (canPublishToClient) {
       options.splice(1, 0, "client_visible");
     }
     return options;
-  }, [profile, project]);
+  }, [canPublishToClient]);
 
   function addFiles(list: FileList | File[] | null) {
     if (!list) return;
@@ -114,8 +120,9 @@ export function JournalComposer({
     try {
       await publishDailyUpdate({
         projectId: project.id,
-        workspaceId:
-          project.workspaceId || project.companyId || profile.defaultWorkspaceId,
+        // Always the Project's own workspaceId — never the current USER's
+        // defaultWorkspaceId, which would be wrong for a shared Project.
+        workspaceId: project.workspaceId || project.companyId,
         workItems: [],
         customActivities: [],
         noWorkToday: false,

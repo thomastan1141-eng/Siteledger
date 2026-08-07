@@ -37,18 +37,17 @@ import {
 } from "firebase/auth";
 import { useAuth } from "@/lib/auth-context";
 import { usePageWidth } from "@/lib/page-width";
-import { useWorkspace } from "@/lib/workspace-context";
 import { getFirebaseAuth } from "@/lib/firebase";
 import {
-  getProject,
+  fetchProjectResolve,
   markProjectCompleted,
   updateProject,
-  workspaceIdsForProfile,
 } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
 import { groupUpdatesByDate, listUpdates } from "@/lib/services/updates";
 import { listMedia } from "@/lib/services/media";
 import type {
+  ColleaguePermissions,
   DailyUpdate,
   ForecastStatus,
   MediaItem,
@@ -84,8 +83,20 @@ export default function ProjectDetailsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { profile } = useAuth();
-  const { workspaceId } = useWorkspace();
   const [project, setProject] = useState<Project | null>(null);
+  // USER-scoped access hints from the server resolver — creator OR ACTIVE
+  // membership only. Never derived from users/{uid}.role or workspace admin.
+  const [access, setAccess] = useState<{
+    isOwner: boolean;
+    memberType: string | null;
+    permissionPreset: string | null;
+    effectivePermissions: ColleaguePermissions | null;
+  }>({
+    isOwner: false,
+    memberType: null,
+    permissionPreset: null,
+    effectivePermissions: null,
+  });
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [updates, setUpdates] = useState<DailyUpdate[]>([]);
   const [media, setMedia] = useState<MediaItem[]>([]);
@@ -135,20 +146,26 @@ export default function ProjectDetailsPage() {
   });
 
   async function reload() {
-    const tenant = workspaceIdsForProfile({
-      defaultWorkspaceId:
-        workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "",
-      companyId: profile?.companyId,
-      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
-    });
     try {
-      const p = await getProject(id, tenant);
-      const ws = p?.workspaceId || p?.companyId || tenant[0];
-      const [s, u, m] = await Promise.all([
-        listSchedule(id, { workspaceId: ws }),
-        listUpdates(id, { workspaceId: ws }),
-        listMedia(id, { workspaceId: ws }),
-      ]);
+      // Server-resolved: creator OR ACTIVE membership, using the Project's
+      // actual workspaceId — never the current USER's defaultWorkspaceId,
+      // which is wrong for a Project shared from another workspace.
+      const resolved = await fetchProjectResolve(id);
+      const p = resolved?.project ?? null;
+      const ws = resolved?.workspaceId;
+      setAccess({
+        isOwner: Boolean(resolved?.isOwner),
+        memberType: resolved?.memberType ?? null,
+        permissionPreset: resolved?.permissionPreset ?? null,
+        effectivePermissions: resolved?.effectivePermissions ?? null,
+      });
+      const [s, u, m] = ws
+        ? await Promise.all([
+            listSchedule(id, { workspaceId: ws }),
+            listUpdates(id, { workspaceId: ws }),
+            listMedia(id, { workspaceId: ws }),
+          ])
+        : [[], [], []];
       setProject(p);
       setSchedule(s);
       setUpdates(u);
@@ -182,7 +199,7 @@ export default function ProjectDetailsPage() {
     setLoading(true);
     reload().finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, workspaceId]);
+  }, [id]);
 
   const summary = useMemo(() => summarizeSchedule(schedule), [schedule]);
   const mediaByUpdate = useMemo(() => {
@@ -203,9 +220,15 @@ export default function ProjectDetailsPage() {
     [media],
   );
 
+  // Only the creator (or a colleague whose effectivePermissions grant
+  // editProjectDetails — i.e. the EDITOR preset) may edit Project settings.
+  // Never a global users/{uid}.role check.
+  const canEditSettings =
+    access.isOwner || access.effectivePermissions?.editProjectDetails === true;
+
   async function saveSettings(e: FormEvent) {
     e.preventDefault();
-    if (!project || profile?.role !== "admin") return;
+    if (!project || !canEditSettings) return;
     setSaving(true);
     try {
       setProject(
@@ -217,7 +240,7 @@ export default function ProjectDetailsPage() {
             manager: edit.manager.trim(),
             address: edit.address.trim(),
           },
-          project.workspaceId || workspaceId || undefined,
+          project.workspaceId,
         ),
       );
     } finally {
@@ -225,22 +248,38 @@ export default function ProjectDetailsPage() {
     }
   }
 
+  const isClientMember = access.memberType === "CLIENT";
+
+  // Client boundary: Settings holds internal-only content (internal notes,
+  // staff-publish switches, delete). Never reachable by a Client member,
+  // even via a stale ?tab=settings link.
+  useEffect(() => {
+    if (isClientMember && tab === "settings") setTab("overview");
+  }, [isClientMember, tab]);
+
   if (loading) return <SiteSpinner />;
   if (!project) {
     return <p style={{ color: "var(--site-text-secondary)" }}>Project not found.</p>;
   }
 
-  const canDeleteProject = Boolean(
-    profile?.uid &&
-      (project.createdBy === profile.uid ||
-        (!project.createdBy && profile.role === "admin")),
-  );
+  // Only the creator may delete the entire Project — never a global role.
+  const canDeleteProject = access.isOwner;
+  // Broad "delete any Media item" — Owner or Editor colleague only. Other
+  // colleagues may still delete their own uploads (enforced server-side).
+  const canDeleteAllMedia =
+    access.isOwner || access.effectivePermissions?.deleteAllMedia === true;
+  const canManageMediaVisibility =
+    access.isOwner ||
+    (!isClientMember &&
+      project.allowStaffPublish &&
+      access.effectivePermissions?.publishMediaToClient === true);
 
   return (
     <div>
       <ProjectChrome
         project={project}
         activeTab={tab}
+        hiddenTabs={isClientMember ? ["settings"] : undefined}
         onTabChange={(next) => {
           if (next === "purchases") {
             router.push(`/projects/${project.id}/purchases`);
@@ -331,7 +370,7 @@ export default function ProjectDetailsPage() {
                     await updateProject(
                       project.id,
                       { startDate },
-                      project.workspaceId || workspaceId || undefined,
+                      project.workspaceId,
                     ),
                   );
                 }}
@@ -352,7 +391,7 @@ export default function ProjectDetailsPage() {
                           project.forecastCompletionDate ||
                           contractCompletionDate,
                       },
-                      project.workspaceId || workspaceId || undefined,
+                      project.workspaceId,
                     ),
                   );
                 }}
@@ -378,7 +417,7 @@ export default function ProjectDetailsPage() {
               </p>
               <MonthWorkCalendar
                 projectId={project.id}
-                workspaceId={project.workspaceId || project.companyId}
+                workspaceId={project.workspaceId}
                 stages={summary.ordered}
                 editable
               />
@@ -467,12 +506,9 @@ export default function ProjectDetailsPage() {
             <ProgressMediaGrid
               items={media.slice(0, 8)}
               allowDownload
-              workspaceId={project.workspaceId || project.companyId}
-              canDelete={profile?.role === "admin"}
-              canManageVisibility={
-                profile?.role === "admin" ||
-                (profile?.role === "staff" && project.allowStaffPublish)
-              }
+              workspaceId={project.workspaceId}
+              canDelete={canDeleteAllMedia}
+              canManageVisibility={canManageMediaVisibility}
               onChanged={() => void reload()}
             />
           </SiteSection>
@@ -485,6 +521,7 @@ export default function ProjectDetailsPage() {
           <JournalComposer
             project={project}
             compact
+            canPublishToClient={canManageMediaVisibility}
             onPublished={async () => {
               await reload();
             }}
@@ -499,10 +536,10 @@ export default function ProjectDetailsPage() {
 
       {tab === "media" ? (
         <div style={{ display: "grid", gap: 16 }}>
-          {profile?.role !== "client" ? (
+          {!isClientMember && project.workspaceId ? (
             <SimpleMediaUploader
               projectId={project.id}
-              workspaceId={project.workspaceId || project.companyId}
+              workspaceId={project.workspaceId}
               onUploaded={() => void reload()}
             />
           ) : null}
@@ -550,12 +587,9 @@ export default function ProjectDetailsPage() {
           <ProgressMediaGrid
             items={mediaTab === "photos" ? photoMedia : videoMedia}
             allowDownload
-            workspaceId={project.workspaceId || project.companyId}
-            canDelete={profile?.role === "admin"}
-            canManageVisibility={
-              profile?.role === "admin" ||
-              (profile?.role === "staff" && project.allowStaffPublish)
-            }
+            workspaceId={project.workspaceId}
+            canDelete={canDeleteAllMedia}
+            canManageVisibility={canManageMediaVisibility}
             onChanged={() => void reload()}
             size={mediaTab === "photos" ? photoSize : videoSize}
           />
@@ -564,7 +598,7 @@ export default function ProjectDetailsPage() {
 
       <ManageStagesDialog
         projectId={project.id}
-        workspaceId={project.workspaceId || workspaceId || undefined}
+        workspaceId={project.workspaceId}
         open={manageStagesOpen}
         onClose={() => setManageStagesOpen(false)}
         onChanged={setSchedule}
@@ -585,7 +619,7 @@ export default function ProjectDetailsPage() {
                 onChange={(e) =>
                   setEdit((s) => ({ ...s, clientName: e.target.value }))
                 }
-                disabled={profile?.role !== "admin"}
+                disabled={!canEditSettings}
               />
             </SiteField>
             <SiteField label="Manager">
@@ -595,7 +629,7 @@ export default function ProjectDetailsPage() {
                   setEdit((s) => ({ ...s, manager: e.target.value }))
                 }
                 placeholder="Enter manager name"
-                disabled={profile?.role !== "admin"}
+                disabled={!canEditSettings}
               />
             </SiteField>
             <div style={{ gridColumn: "1 / -1" }}>
@@ -605,7 +639,7 @@ export default function ProjectDetailsPage() {
                   onChange={(e) =>
                     setEdit((s) => ({ ...s, address: e.target.value }))
                   }
-                  disabled={profile?.role !== "admin"}
+                  disabled={!canEditSettings}
                 />
               </SiteField>
             </div>
@@ -619,7 +653,7 @@ export default function ProjectDetailsPage() {
                     contractCompletionDate: e.target.value,
                   }))
                 }
-                disabled={profile?.role !== "admin"}
+                disabled={!canEditSettings}
               />
             </SiteField>
             <SiteField label="Current forecast">
@@ -711,16 +745,13 @@ export default function ProjectDetailsPage() {
             <SiteButton type="submit" disabled={saving}>
               {saving ? "Saving…" : "Save settings"}
             </SiteButton>
-            {profile?.role === "admin" && project.status !== "completed" ? (
+            {canEditSettings && project.status !== "completed" ? (
               <SiteButton
                 type="button"
                 variant="ghost"
                 onClick={async () => {
                   setProject(
-                    await markProjectCompleted(
-                      project.id,
-                      project.workspaceId || workspaceId || undefined,
-                    ),
+                    await markProjectCompleted(project.id, project.workspaceId),
                   );
                 }}
               >
@@ -801,11 +832,7 @@ export default function ProjectDetailsPage() {
                       ),
                     );
                     const token = await current.getIdToken(true);
-                    const ws =
-                      project.workspaceId ||
-                      workspaceId ||
-                      profile?.defaultWorkspaceId ||
-                      "";
+                    const ws = project.workspaceId;
                     const res = await fetch(
                       `/api/projects/${project.id}/trash`,
                       {

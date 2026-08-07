@@ -97,25 +97,15 @@ export async function createInvitationRecord(input: {
 }
 
 /**
- * True workspace-level admin check — top-level SaaS admin account, company
- * admin mirror, or an active OWNER/ADMIN workspace member.
+ * Workspace-scoped admin check — company admin mirror or active OWNER/ADMIN
+ * workspace member. Does not use users/{uid}.role.
  */
 export async function assertWorkspaceAdmin(uid: string, workspaceId: string) {
   const db = getAdminDb();
-  const [account, companyUser, member] = await Promise.all([
-    db.doc(`users/${uid}`).get(),
+  const [companyUser, member] = await Promise.all([
     db.doc(`companies/${workspaceId}/users/${uid}`).get(),
     db.doc(`workspaces/${workspaceId}/members/${uid}`).get(),
   ]);
-
-  const a = account.data();
-  if (
-    a?.role === "admin" &&
-    a?.active === true &&
-    (a.defaultWorkspaceId === workspaceId || a.companyId === workspaceId)
-  ) {
-    return;
-  }
 
   const cu = companyUser.data();
   if (companyUser.exists && cu?.role === "admin" && cu?.active !== false) {
@@ -135,8 +125,9 @@ export async function assertWorkspaceAdmin(uid: string, workspaceId: string) {
 }
 
 /**
- * Project-level access-management check — the project creator, a member with
- * manageProjectAccess/OWNER permissions, or any workspace admin.
+ * Project-level access-management check — creator-only. No member
+ * permission, memberType, company admin, or workspace admin ever
+ * substitutes for the Project creator here.
  */
 export async function assertCanManageProjectAccess(
   uid: string,
@@ -156,23 +147,12 @@ export async function assertCanManageProjectAccess(
       status: 403,
     });
   }
-  if (data.createdBy === uid) return project;
-
-  const member = await db
-    .doc(`companies/${workspaceId}/projects/${projectId}/members/${uid}`)
-    .get();
-  const m = member.data();
-  if (
-    member.exists &&
-    m?.status === "ACTIVE" &&
-    (m?.memberType === "OWNER" ||
-      m?.permissions?.manageProjectAccess === true ||
-      m?.permissionPreset === "OWNER")
-  ) {
-    return project;
+  if (data.createdBy !== uid) {
+    throw Object.assign(
+      new Error("Only the project creator can manage access."),
+      { status: 403 },
+    );
   }
-
-  await assertWorkspaceAdmin(uid, workspaceId);
   return project;
 }
 

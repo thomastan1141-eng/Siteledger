@@ -3,6 +3,7 @@ import { getAdminDb } from "@/lib/firebase-admin";
 import { softDeleteMedia, updateMediaAdmin } from "@/lib/bunny/media-store";
 import { deleteBunnyVideo } from "@/lib/bunny/server";
 import { authErrorResponse, verifyAuthenticatedRequest } from "@/lib/server/auth";
+import { resolveProjectForUser } from "@/lib/server/project-directory";
 import {
   assertClientVisibleAllowed,
   assertProjectPermission,
@@ -38,21 +39,30 @@ export async function PATCH(
       return NextResponse.json({ error: "Media not found." }, { status: 404 });
     }
 
-    const ctx = await assertProjectPermission({
-      uid: user.uid,
-      projectId,
-      workspaceId: body.workspaceId,
-      action: "EDIT_MEDIA",
-    });
-
+    // Resolve the authoritative workspaceId (creator OR ACTIVE member) before
+    // touching the media doc, then load the media doc's own uploadedBy so
+    // "own vs all" (editOwnMedia/editAllMedia) can be evaluated correctly —
+    // assertProjectPermission cannot know ownership without it.
+    const resolved = await resolveProjectForUser(user.uid, projectId, body.workspaceId);
+    if (!resolved) {
+      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    }
     const snap = await getAdminDb()
       .doc(
-        `companies/${ctx.workspaceId}/projects/${projectId}/media/${mediaId}`,
+        `companies/${resolved.workspaceId}/projects/${projectId}/media/${mediaId}`,
       )
       .get();
     if (!snap.exists || snap.data()?.provider !== "BUNNY_STREAM") {
       return NextResponse.json({ error: "Media not found." }, { status: 404 });
     }
+
+    const ctx = await assertProjectPermission({
+      uid: user.uid,
+      projectId,
+      workspaceId: resolved.workspaceId,
+      action: "EDIT_MEDIA",
+      uploadedBy: (snap.data()?.uploadedBy as string | null) ?? null,
+    });
 
     const patch: Record<string, unknown> = {};
     if (body.title !== undefined) {
@@ -103,21 +113,27 @@ export async function DELETE(
       return NextResponse.json({ error: "Media not found." }, { status: 404 });
     }
 
-    const ctx = await assertProjectPermission({
-      uid: user.uid,
-      projectId,
-      workspaceId: body.workspaceId,
-      action: "DELETE_MEDIA",
-    });
-
+    // Same ownership-before-permission ordering as PATCH above.
+    const resolved = await resolveProjectForUser(user.uid, projectId, body.workspaceId);
+    if (!resolved) {
+      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    }
     const ref = getAdminDb().doc(
-      `companies/${ctx.workspaceId}/projects/${projectId}/media/${mediaId}`,
+      `companies/${resolved.workspaceId}/projects/${projectId}/media/${mediaId}`,
     );
     const snap = await ref.get();
     if (!snap.exists || snap.data()?.provider !== "BUNNY_STREAM") {
       return NextResponse.json({ error: "Media not found." }, { status: 404 });
     }
     const data = snap.data() || {};
+
+    const ctx = await assertProjectPermission({
+      uid: user.uid,
+      projectId,
+      workspaceId: resolved.workspaceId,
+      action: "DELETE_MEDIA",
+      uploadedBy: (data.uploadedBy as string | null) ?? null,
+    });
     const previousStatus = data.status || "READY";
     const bunnyVideoId = String(data.bunnyVideoId || "");
     if (!bunnyVideoId) {

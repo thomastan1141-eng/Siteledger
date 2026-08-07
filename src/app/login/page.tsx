@@ -14,14 +14,10 @@ import {
   SiteSpinner,
 } from "@/components/progress/primitives";
 
-function postLoginPath(
-  profileRole: string | undefined,
-  next: string | null,
-  mustChangePassword?: boolean,
-) {
+function postLoginPath(next: string | null, mustChangePassword?: boolean) {
   if (mustChangePassword) return "/set-password";
   if (next) return next;
-  return profileRole === "client" ? "/client" : "/dashboard";
+  return "/dashboard";
 }
 
 function LoginForm() {
@@ -72,7 +68,7 @@ function LoginForm() {
       return;
     }
     if (profile) {
-      router.replace(postLoginPath(profile.role, params.get("next")));
+      router.replace(postLoginPath(params.get("next")));
     }
   }, [
     loading,
@@ -97,19 +93,15 @@ function LoginForm() {
         router.replace("/set-password");
         return;
       }
-      if (!current?.emailVerified && (!p || p.role !== "client")) {
+      if (!current?.emailVerified) {
         router.replace("/verify-email");
         return;
       }
-      if (p && p.role !== "client" && !p.onboardingComplete) {
+      if (!p || !p.onboardingComplete) {
         router.replace("/verify-email");
         return;
       }
-      if (!p) {
-        router.replace("/verify-email");
-        return;
-      }
-      router.replace(postLoginPath(p.role, params.get("next"), p.mustChangePassword));
+      router.replace(postLoginPath(params.get("next"), p.mustChangePassword));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

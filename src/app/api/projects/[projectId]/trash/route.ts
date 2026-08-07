@@ -56,37 +56,15 @@ export async function POST(
     }
     const data = snap.data() || {};
     const createdBy = data.createdBy ? String(data.createdBy) : "";
-    // Creator-only; legacy docs without createdBy: workspace admin may claim delete.
-    if (createdBy && createdBy !== user.uid) {
+    // Creator-only — no company-admin/workspace-owner fallback. A Project
+    // missing createdBy cannot be deleted through this route at all; it
+    // must be reported via the ownerless-Projects dry-run report and fixed
+    // (backfilled) out-of-band, never auto-claimed by an admin login.
+    if (!createdBy || createdBy !== user.uid) {
       return NextResponse.json(
         { error: "Only the project creator can delete this project." },
         { status: 403 },
       );
-    }
-    if (!createdBy) {
-      // Legacy projects missing createdBy: allow workspace admin only.
-      const [companyUser, account, member] = await Promise.all([
-        db.doc(`companies/${workspaceId}/users/${user.uid}`).get(),
-        db.doc(`users/${user.uid}`).get(),
-        db.doc(`workspaces/${workspaceId}/members/${user.uid}`).get(),
-      ]);
-      const isAdmin =
-        (companyUser.exists &&
-          companyUser.data()?.role === "admin" &&
-          companyUser.data()?.active !== false) ||
-        (account.exists &&
-          account.data()?.role === "admin" &&
-          (account.data()?.defaultWorkspaceId === workspaceId ||
-            account.data()?.companyId === workspaceId)) ||
-        (member.exists &&
-          ["OWNER", "ADMIN"].includes(String(member.data()?.role || "")) &&
-          String(member.data()?.status || "") === "ACTIVE");
-      if (!isAdmin) {
-        return NextResponse.json(
-          { error: "Only the project creator can delete this project." },
-          { status: 403 },
-        );
-      }
     }
     if (data.status === "trashed" || data.status === "purging") {
       return NextResponse.json({ ok: true, alreadyTrashed: true });
@@ -111,7 +89,6 @@ export async function POST(
     const purgeAt = new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
 
     await ref.update({
-      ...(createdBy ? {} : { createdBy: user.uid }),
       statusBeforeTrash: data.status || "upcoming",
       status: "trashed",
       deletedAt: deletedAt.toISOString(),

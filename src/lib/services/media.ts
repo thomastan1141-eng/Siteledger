@@ -5,12 +5,12 @@ import {
   getDocs,
   orderBy,
   query,
+  setDoc,
   updateDoc,
   where,
   writeBatch,
 } from "firebase/firestore";
 import {
-  getDownloadURL,
   ref,
   uploadBytesResumable,
   type UploadTaskSnapshot,
@@ -40,6 +40,9 @@ export async function uploadMediaFile(
     date?: string;
     visibility: MediaVisibility;
     workspaceId?: string;
+    uploadedBy: string;
+    /** Pre-allocated Firestore media doc id — required on new uploads. */
+    mediaId: string;
     onProgress?: (pct: number) => void;
   },
 ) {
@@ -68,6 +71,17 @@ export async function uploadMediaFile(
   const storageRef = ref(getFirebaseStorage(), path);
   const task = uploadBytesResumable(storageRef, file, {
     contentType: file.type || undefined,
+    customMetadata: {
+      mediaId: options.mediaId,
+      clientVisible:
+        options.visibility === "client_visible" ||
+        options.visibility === "handover"
+          ? "true"
+          : "false",
+      uploadedBy: options.uploadedBy,
+      projectId,
+      workspaceId: tenant,
+    },
   });
 
   await new Promise<UploadTaskSnapshot>((resolve, reject) => {
@@ -85,10 +99,11 @@ export async function uploadMediaFile(
     );
   });
 
-  const downloadUrl = await getDownloadURL(task.snapshot.ref);
   return {
     storagePath: path,
-    downloadUrl,
+    // Never persist a Firebase download-token URL. UI requests a short-lived
+    // signed URL from /api/media/{mediaId}/download after ACL validation.
+    downloadUrl: "",
     sizeBytes: file.size,
     contentType: file.type || "application/octet-stream",
     fileName: file.name,
@@ -113,29 +128,40 @@ export async function uploadPhotoMedia(
     onProgress?: (pct: number) => void;
   },
 ) {
+  const workspaceId = requireTenantId(options.workspaceId);
   const date = options.date || options.capturedAt.slice(0, 10) || todayKey();
   const visibility: MediaVisibility = options.clientVisible
     ? "client_visible"
     : "internal";
 
+  const mediaRef = doc(
+    collection(getFirebaseDb(), mediaPath(projectId, workspaceId)),
+  );
+
   const uploaded = await uploadMediaFile(projectId, file, {
     date,
     visibility,
-    workspaceId: options.workspaceId,
+    workspaceId,
+    uploadedBy: options.uploadedBy,
+    mediaId: mediaRef.id,
     onProgress: options.onProgress,
   });
 
-  return createMediaRecord(projectId, {
-    ...uploaded,
-    workspaceId: options.workspaceId,
-    visibility,
-    clientVisible: options.clientVisible,
-    capturedAt: options.capturedAt,
-    date,
-    workItems: [],
-    uploadedBy: options.uploadedBy,
-    uploadedByName: options.uploadedByName,
-  });
+  return createMediaRecord(
+    projectId,
+    {
+      ...uploaded,
+      workspaceId,
+      visibility,
+      clientVisible: options.clientVisible,
+      capturedAt: options.capturedAt,
+      date,
+      workItems: [],
+      uploadedBy: options.uploadedBy,
+      uploadedByName: options.uploadedByName,
+    },
+    mediaRef.id,
+  );
 }
 
 export async function createMediaRecord(
@@ -143,6 +169,7 @@ export async function createMediaRecord(
   input: Omit<MediaItem, "id" | "projectId" | "companyId" | "createdAt"> & {
     workspaceId?: string;
   },
+  mediaId?: string,
 ) {
   const workspaceId = requireTenantId(input.workspaceId);
   const data: Omit<MediaItem, "id"> = {
@@ -155,6 +182,15 @@ export async function createMediaRecord(
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+
+  if (mediaId) {
+    await setDoc(
+      doc(getFirebaseDb(), mediaPath(projectId, workspaceId), mediaId),
+      sanitizeForFirestore(data),
+    );
+    return { id: mediaId, ...data };
+  }
+
   const refDoc = await addDoc(
     collection(getFirebaseDb(), mediaPath(projectId, workspaceId)),
     sanitizeForFirestore(data),

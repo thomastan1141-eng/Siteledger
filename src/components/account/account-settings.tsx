@@ -88,14 +88,11 @@ export function AccountSettings() {
   );
 
   const canUsePasswordForm = hasPasswordProvider(user);
-  const isClient = profile?.role === "client";
-  const isStaff = profile?.role === "staff";
-  const showPlan = !isClient && !isStaff;
   const accountType = resolveAccountTypeLabel(profile, workspace, membership);
   const orgName = organizationDisplayName(profile, workspace);
   const orgType = resolveOrganizationType(workspace);
 
-  if (loading || (wsLoading && !isClient)) return <SiteSpinner />;
+  if (loading || wsLoading) return <SiteSpinner />;
 
   async function onChangePassword(e: FormEvent) {
     e.preventDefault();
@@ -178,28 +175,23 @@ export function AccountSettings() {
             </dt>
             <dd style={{ margin: "4px 0 0" }}>{accountType}</dd>
           </div>
-          {!isClient ? (
-            <div>
-              <dt style={{ color: "var(--site-text-secondary)" }}>
-                Organization / Company name
-              </dt>
-              <dd style={{ margin: "4px 0 0" }}>
-                {orgName}
-                {accountType !== "Client" ? (
-                  <span
-                    style={{
-                      marginLeft: 8,
-                      color: "var(--site-text-secondary)",
-                      fontSize: 13,
-                    }}
-                  >
-                    ({orgType === "COMPANY" ? "Company" : "Personal"}{" "}
-                    organization)
-                  </span>
-                ) : null}
-              </dd>
-            </div>
-          ) : null}
+          <div>
+            <dt style={{ color: "var(--site-text-secondary)" }}>
+              Organization / Company name
+            </dt>
+            <dd style={{ margin: "4px 0 0" }}>
+              {orgName}
+              <span
+                style={{
+                  marginLeft: 8,
+                  color: "var(--site-text-secondary)",
+                  fontSize: 13,
+                }}
+              >
+                ({orgType === "COMPANY" ? "Company" : "Personal"} organization)
+              </span>
+            </dd>
+          </div>
           <div>
             <dt style={{ color: "var(--site-text-secondary)" }}>
               Email verification
@@ -282,28 +274,26 @@ export function AccountSettings() {
         )}
       </SiteSection>
 
-      {showPlan ? (
-        <SiteSection title="Account plan">
-          <p style={{ margin: 0, fontSize: 14 }}>
-            Current plan: <strong>Free</strong>
-          </p>
-          <p
-            style={{
-              margin: "8px 0 0",
-              fontSize: 13,
-              color: "var(--site-text-secondary)",
-            }}
-          >
-            Subscription status:{" "}
-            {workspace?.subscriptionStatus === "ACTIVE"
-              ? "Active"
-              : workspace?.subscriptionStatus === "TRIALING"
-                ? "Trial"
-                : "None"}
-            . Paid plans are not enabled yet.
-          </p>
-        </SiteSection>
-      ) : null}
+      <SiteSection title="Account plan">
+        <p style={{ margin: 0, fontSize: 14 }}>
+          Current plan: <strong>Free</strong>
+        </p>
+        <p
+          style={{
+            margin: "8px 0 0",
+            fontSize: 13,
+            color: "var(--site-text-secondary)",
+          }}
+        >
+          Subscription status:{" "}
+          {workspace?.subscriptionStatus === "ACTIVE"
+            ? "Active"
+            : workspace?.subscriptionStatus === "TRIALING"
+              ? "Trial"
+              : "None"}
+          . Paid plans are not enabled yet.
+        </p>
+      </SiteSection>
 
       <SiteSection title="Session">
         <dl style={{ display: "grid", gap: 12, margin: 0, fontSize: 14 }}>

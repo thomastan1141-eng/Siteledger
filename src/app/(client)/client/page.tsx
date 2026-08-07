@@ -27,11 +27,14 @@ export default function ClientOverviewPage() {
   const [upcoming, setUpcoming] = useState<DailyPlan[]>([]);
 
   useEffect(() => {
-    listClientVisiblePlans(project.id).then((plans) => {
+    listClientVisiblePlans(
+      project.id,
+      project.workspaceId || project.companyId,
+    ).then((plans) => {
       const today = singaporeDateKey();
       setUpcoming(plans.filter((p) => p.date >= today).slice(0, 6));
     });
-  }, [project.id]);
+  }, [project.id, project.workspaceId, project.companyId]);
 
   const ordered = useMemo(() => summary.ordered, [summary.ordered]);
 

@@ -160,14 +160,26 @@ beforeEach(async () => {
 });
 
 describe("projects list and get assignment boundaries", () => {
-  it("admin can list workspace projects by workspaceId+status", async () => {
+  it("creator can list their own active projects by createdBy — never a bare workspaceId+status query", async () => {
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore();
-    const q = query(
+    // Company-admin / workspace-wide Project queries are removed entirely.
+    // A list query can only be proven safe when it is backed by an
+    // equivalent createdBy filter — a bare workspaceId+status query (no
+    // createdBy) must be denied even for the creator of every doc it would
+    // have returned, because Rules can't prove that from the query alone.
+    const bare = query(
       collection(db, `companies/${COMPANY_ID}/projects`),
       where("workspaceId", "==", COMPANY_ID),
       where("status", "in", ["in_progress", "upcoming", "completed", "on_hold"]),
     );
-    const snap = await assertSucceeds(getDocs(q));
+    await assertFails(getDocs(bare));
+
+    const scoped = query(
+      collection(db, `companies/${COMPANY_ID}/projects`),
+      where("createdBy", "==", ADMIN_UID),
+      where("status", "in", ["in_progress", "upcoming", "completed", "on_hold"]),
+    );
+    const snap = await assertSucceeds(getDocs(scoped));
     const ids = snap.docs.map((d) => d.id);
     expect(ids).toContain(PROJECT_A);
     expect(ids).toContain(PROJECT_B);

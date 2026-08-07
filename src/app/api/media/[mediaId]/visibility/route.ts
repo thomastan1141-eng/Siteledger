@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebase-admin";
+import { getStorage } from "firebase-admin/storage";
 import { updateMediaAdmin } from "@/lib/bunny/media-store";
 import { writeAuditEvent } from "@/lib/server/audit";
 import { authErrorResponse, verifyAuthenticatedRequest } from "@/lib/server/auth";
@@ -64,10 +65,38 @@ export async function PATCH(
       ? "client_visible"
       : "internal";
 
+    const storagePath =
+      data.provider !== "BUNNY_STREAM" ? String(data.storagePath || "") : "";
+    const syncStorageVisibility = async () => {
+      if (!storagePath) return;
+      const file = getStorage().bucket().file(storagePath);
+      const [metadata] = await file.getMetadata();
+      const existing = (metadata.metadata || {}) as Record<string, string>;
+      await file.setMetadata({
+        metadata: {
+          ...existing,
+          mediaId: existing.mediaId || mediaId,
+          clientVisible: body.clientVisible ? "true" : "false",
+          uploadedBy: existing.uploadedBy || String(data.uploadedBy || ""),
+          projectId: existing.projectId || projectId,
+          workspaceId: existing.workspaceId || ctx.workspaceId,
+        },
+      });
+    };
+
+    // Hiding is storage-first (fail closed). Publishing is Firestore-first,
+    // then Storage; a metadata failure leaves the object inaccessible rather
+    // than exposing an internal object.
+    if (!body.clientVisible) {
+      await syncStorageVisibility();
+    }
     await updateMediaAdmin(ctx.workspaceId, projectId, mediaId, {
       clientVisible: body.clientVisible,
       visibility: nextVisibility,
     });
+    if (body.clientVisible) {
+      await syncStorageVisibility();
+    }
 
     await writeAuditEvent({
       workspaceId: ctx.workspaceId,

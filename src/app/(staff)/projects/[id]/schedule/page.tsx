@@ -13,8 +13,7 @@ import {
 import { WeekTimeline } from "@/components/progress/week-timeline";
 import { useAuth } from "@/lib/auth-context";
 import { usePageWidth } from "@/lib/page-width";
-import { useWorkspace } from "@/lib/workspace-context";
-import { getProject, workspaceIdsForProfile } from "@/lib/services/projects";
+import { fetchProjectResolve } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
 import type { Project, ScheduleItem } from "@/lib/types";
 import { getProjectDisplayName } from "@/lib/utils";
@@ -26,35 +25,29 @@ export default function SchedulePage() {
   usePageWidth("wide");
   const { id } = useParams<{ id: string }>();
   const { profile } = useAuth();
-  const { workspaceId } = useWorkspace();
   const [project, setProject] = useState<Project | null>(null);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [manageOpen, setManageOpen] = useState(false);
 
   useEffect(() => {
-    const tenant = workspaceIdsForProfile({
-      defaultWorkspaceId:
-        workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "",
-      companyId: profile?.companyId,
-      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
-    });
-    Promise.all([
-      getProject(id, tenant),
-      // schedule uses resolved project workspace after load
-      Promise.resolve([] as ScheduleItem[]),
-    ])
-      .then(async ([p]) => {
+    if (!profile?.uid) return;
+    // Server-resolved: creator OR ACTIVE membership, using the Project's
+    // actual workspaceId — never the current USER's defaultWorkspaceId.
+    fetchProjectResolve(id)
+      .then(async (resolved) => {
+        const p = resolved?.project ?? null;
         setProject(p);
-        if (!p) {
+        if (!p || !resolved?.workspaceId) {
           setSchedule([]);
           return;
         }
-        const ws = p.workspaceId || p.companyId || tenant[0];
-        setSchedule(await listSchedule(id, { workspaceId: ws }));
+        setSchedule(
+          await listSchedule(id, { workspaceId: resolved.workspaceId }),
+        );
       })
       .finally(() => setLoading(false));
-  }, [id, workspaceId, profile]);
+  }, [id, profile?.uid]);
 
   if (loading) return <SiteSpinner />;
   if (!project) {
@@ -97,7 +90,7 @@ export default function SchedulePage() {
       <SiteSection title="Monthly work calendar">
         <MonthWorkCalendar
           projectId={project.id}
-          workspaceId={project.workspaceId || workspaceId || undefined}
+          workspaceId={project.workspaceId}
           stages={summary.ordered}
           editable
         />
@@ -105,7 +98,7 @@ export default function SchedulePage() {
 
       <ManageStagesDialog
         projectId={project.id}
-        workspaceId={project.workspaceId || workspaceId || undefined}
+        workspaceId={project.workspaceId}
         open={manageOpen}
         onClose={() => setManageOpen(false)}
         onChanged={setSchedule}

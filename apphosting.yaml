@@ -48,3 +48,7 @@ env:
     secret: BUNNY_STREAM_EMBED_TOKEN_KEY
     availability:
       - RUNTIME
+  - variable: BUNNY_STREAM_CDN_TOKEN_KEY
+    secret: BUNNY_STREAM_CDN_TOKEN_KEY
+    availability:
+      - RUNTIME

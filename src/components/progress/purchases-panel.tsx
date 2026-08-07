@@ -42,7 +42,6 @@ import {
   parseMoney,
 } from "@/lib/money";
 import {
-  canManagePurchase,
   createPurchase,
   deletePurchase,
   duplicatePurchase,
@@ -53,11 +52,11 @@ import {
   summarizeCategory,
   updatePurchase,
   uploadPurchasePhotos,
+  type PurchaseActor,
   type PurchaseInput,
 } from "@/lib/services/purchases";
 import { updateProject } from "@/lib/services/projects";
 import type {
-  AppUser,
   LightingSpecifications,
   Project,
   PurchaseCategory,
@@ -66,6 +65,7 @@ import type {
   PurchasePhoto,
   PurchaseResponsibility,
   PurchaseStatus,
+  ColleaguePermissions,
 } from "@/lib/types";
 import {
   DEFAULT_PURCHASE_LOCATIONS,
@@ -128,10 +128,17 @@ export function PurchasesPanel({
   project,
   onProjectUpdated,
   clientMode = false,
+  access = null,
 }: {
   project: Project;
   onProjectUpdated?: (project: Project) => void;
   clientMode?: boolean;
+  /** Server-resolved Project access — creator or ACTIVE membership. Never
+   *  derived from users/{uid}.role or company/workspace admin. */
+  access?: {
+    isOwner: boolean;
+    effectivePermissions: ColleaguePermissions | null;
+  } | null;
 }) {
   const { profile } = useAuth();
   const [category, setCategory] = useState<PurchaseCategory>("LIGHTING");
@@ -151,8 +158,29 @@ export function PurchasesPanel({
   const rate =
     project.purchaseSettings?.rmbToSgdRate ?? DEFAULT_RMB_TO_SGD_RATE;
   const purchaseWs = project.workspaceId || project.companyId;
-  const canEditRate =
-    !clientMode && (profile?.role === "admin" || profile?.role === "staff");
+  const isCreator = Boolean(profile?.uid && project.createdBy === profile.uid);
+  // Purchases management is creator-only or EDITOR-preset colleague only
+  // (matches firestore.rules `editPurchases`) — never users/{uid}.role or
+  // company/workspace admin. UPDATE_PROGRESS and VIEW_ONLY can view but
+  // never manage Purchases.
+  const canManageAllPurchases =
+    !clientMode &&
+    (isCreator || access?.effectivePermissions?.editPurchases === true);
+  // Clients are read-only for Purchases (OWNER items only via list filter).
+  // VIEW_ONLY / UPDATE_PROGRESS also cannot manage — only creator/EDITOR.
+  // Project-scoped actor passed to the write helpers below — derived
+  // entirely from the resolved Project access, never the legacy global
+  // users/{uid}.role. Firestore Rules independently re-enforce every write.
+  const purchaseActor: PurchaseActor | null = profile
+    ? {
+        uid: profile.uid,
+        canManageAll: canManageAllPurchases,
+        isClient: clientMode,
+      }
+    : null;
+  // Exchange-rate edits are Project-level settings — creator only, not a
+  // global users/{uid}.role check. Firestore Rules re-enforce this on write.
+  const canEditRate = !clientMode && isCreator;
   const rateValue = rateDirty ? rateDraft : String(rate);
   const expandTable = !clientMode;
 
@@ -161,13 +189,19 @@ export function PurchasesPanel({
       category: active,
       rmbToSgdRate: rate,
       workspaceId: purchaseWs,
+      clientOnly: clientMode,
     });
     setItems(list);
   }
 
   useEffect(() => {
     let cancelled = false;
-    listPurchases(project.id, { category, rmbToSgdRate: rate, workspaceId: purchaseWs }).then((list) => {
+    listPurchases(project.id, {
+      category,
+      rmbToSgdRate: rate,
+      workspaceId: purchaseWs,
+      clientOnly: clientMode,
+    }).then((list) => {
       if (cancelled) return;
       setItems(list);
       setLoading(false);
@@ -196,14 +230,14 @@ export function PurchasesPanel({
   }
 
   async function patchItem(item: PurchaseItem, patch: Partial<PurchaseInput>) {
-    if (!profile) return;
+    if (!purchaseActor) return;
     flash("saving");
     try {
       const next = await updatePurchase(
         project.id,
         item.id,
         patch,
-        profile,
+        purchaseActor,
         rate,
         purchaseWs,
       );
@@ -217,7 +251,7 @@ export function PurchasesPanel({
   }
 
   async function saveRate() {
-    if (!profile || !canEditRate) return;
+    if (!purchaseActor || !canEditRate) return;
     const nextRate = parseMoney(rateDirty ? rateDraft : String(rate));
     if (nextRate <= 0) {
       setError("Exchange rate must be greater than 0.");
@@ -231,7 +265,7 @@ export function PurchasesPanel({
         purchaseWs,
       );
       onProjectUpdated?.(updated);
-      await recalculatePurchaseTotals(project.id, nextRate, profile, purchaseWs);
+      await recalculatePurchaseTotals(project.id, nextRate, purchaseActor, purchaseWs);
       setRateDirty(false);
       await reload(category);
       flash("saved");
@@ -333,16 +367,18 @@ export function PurchasesPanel({
         <SiteButton type="button" variant="ghost" onClick={downloadCsv}>
           Export CSV
         </SiteButton>
-        <SiteButton
-          type="button"
-          variant="accent"
-          onClick={() => {
-            setEditing(null);
-            setFormOpen(true);
-          }}
-        >
-          <Plus size={16} /> Add item
-        </SiteButton>
+        {canManageAllPurchases ? (
+          <SiteButton
+            type="button"
+            variant="accent"
+            onClick={() => {
+              setEditing(null);
+              setFormOpen(true);
+            }}
+          >
+            <Plus size={16} /> Add item
+          </SiteButton>
+        ) : null}
       </div>
 
       {error ? (
@@ -410,7 +446,8 @@ export function PurchasesPanel({
                         key={item.id}
                         item={item}
                         showLightingSpecs={category === "LIGHTING"}
-                        user={profile}
+                        canManageAll={canManageAllPurchases}
+                        clientMode={clientMode}
                         rate={rate}
                         onGallery={() => setGallery(item)}
                         onEdit={() => {
@@ -419,20 +456,25 @@ export function PurchasesPanel({
                         }}
                         onPatch={(patch) => patchItem(item, patch)}
                         onDuplicate={async () => {
-                          if (!profile) return;
+                          if (!purchaseActor) return;
                           await duplicatePurchase(
                             project.id,
                             item.id,
-                            profile,
+                            purchaseActor,
                             rate,
                             purchaseWs,
                           );
                           await reload();
                         }}
                         onDelete={async () => {
-                          if (!profile) return;
+                          if (!purchaseActor) return;
                           if (!confirm(`Delete “${item.itemName}”?`)) return;
-                          await deletePurchase(project.id, item.id, profile, purchaseWs);
+                          await deletePurchase(
+                            project.id,
+                            item.id,
+                            purchaseActor,
+                            purchaseWs,
+                          );
                           await reload();
                         }}
                       />
@@ -487,7 +529,7 @@ export function PurchasesPanel({
                   {item.action ? (
                     <p className="site-purchase-card-action">{item.action}</p>
                   ) : null}
-                  {canManagePurchase(profile, item) ? (
+                  {canManageAllPurchases ? (
                     <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                       <button
                         type="button"
@@ -512,15 +554,15 @@ export function PurchasesPanel({
         <PurchaseFormSheet
           category={category}
           rate={rate}
-          user={profile}
+          user={purchaseActor}
           initial={editing}
-          clientMode={clientMode || profile?.role === "client"}
+          clientMode={clientMode}
           onClose={() => {
             setFormOpen(false);
             setEditing(null);
           }}
           onSaved={async (draft, pending, removedIds, coverPendingId) => {
-            if (!profile) return;
+            if (!purchaseActor) return;
             let saved: PurchaseItem;
             if (editing) {
               for (const photoId of removedIds) {
@@ -528,7 +570,7 @@ export function PurchasesPanel({
                   project.id,
                   editing.id,
                   photoId,
-                  profile,
+                  purchaseActor,
                   rate,
                   purchaseWs,
                 );
@@ -537,7 +579,7 @@ export function PurchasesPanel({
                 project.id,
                 editing.id,
                 draft,
-                profile,
+                purchaseActor,
                 rate,
                 purchaseWs,
               );
@@ -545,7 +587,7 @@ export function PurchasesPanel({
               saved = await createPurchase(
                 project.id,
                 { ...draft, category },
-                profile,
+                purchaseActor,
                 rate,
                 purchaseWs,
               );
@@ -556,7 +598,7 @@ export function PurchasesPanel({
                 project.id,
                 saved.id,
                 pending.map((p) => p.file),
-                profile,
+                purchaseActor,
                 rate,
                 undefined,
                 purchaseWs,
@@ -570,7 +612,7 @@ export function PurchasesPanel({
                     project.id,
                     saved.id,
                     { coverImageUrl: coverPhoto.url },
-                    profile,
+                    purchaseActor,
                     rate,
                     purchaseWs,
                   );
@@ -587,14 +629,20 @@ export function PurchasesPanel({
       {gallery ? (
         <PurchaseGallery
           item={gallery}
-          user={profile}
+          user={purchaseActor}
+          canManage={canManageAllPurchases}
           projectId={project.id}
+          workspaceId={purchaseWs}
           rate={rate}
           onClose={() => setGallery(null)}
           onChanged={async () => {
             await reload();
             const next = (
-              await listPurchases(project.id, { rmbToSgdRate: rate, workspaceId: purchaseWs })
+              await listPurchases(project.id, {
+                rmbToSgdRate: rate,
+                workspaceId: purchaseWs,
+                clientOnly: clientMode,
+              })
             ).find((p) => p.id === gallery.id);
             if (next) setGallery(next);
           }}
@@ -828,7 +876,8 @@ function ActionMenu({
 function PurchaseRow({
   item,
   showLightingSpecs,
-  user,
+  canManageAll,
+  clientMode,
   rate,
   onGallery,
   onEdit,
@@ -838,7 +887,9 @@ function PurchaseRow({
 }: {
   item: PurchaseItem;
   showLightingSpecs: boolean;
-  user?: AppUser | null;
+  /** Creator or EDITOR-preset colleague only — matches editPurchases. */
+  canManageAll: boolean;
+  clientMode: boolean;
   rate: number;
   onGallery: () => void;
   onEdit: () => void;
@@ -846,7 +897,8 @@ function PurchaseRow({
   onDuplicate: () => void;
   onDelete: () => void;
 }) {
-  const editable = canManagePurchase(user, item);
+  // Clients never edit Purchase details or photos.
+  const editable = canManageAll;
   const [menuOpen, setMenuOpen] = useState(false);
   const [actionSaving, setActionSaving] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
@@ -895,7 +947,7 @@ function PurchaseRow({
         </td>
       ) : null}
       <td>
-        {editable && user?.role !== "client" ? (
+        {editable && !clientMode ? (
           <select
             className="site-purchase-inline"
             value={item.purchaseResponsibility}
@@ -1041,7 +1093,7 @@ function PurchaseRow({
                 <Pencil size={13} /> Edit
               </button>
             ) : null}
-            {user?.role === "admin" || user?.role === "staff" ? (
+            {canManageAll ? (
               <button
                 type="button"
                 onClick={() => {
@@ -1052,7 +1104,7 @@ function PurchaseRow({
                 <Copy size={13} /> Duplicate
               </button>
             ) : null}
-            {user?.role === "admin" || user?.role === "staff" ? (
+            {canManageAll ? (
               <button
                 type="button"
                 onClick={() => {
@@ -1387,7 +1439,7 @@ function PurchaseFormSheet({
 }: {
   category: PurchaseCategory;
   rate: number;
-  user?: AppUser | null;
+  user?: PurchaseActor | null;
   initial: PurchaseItem | null;
   clientMode: boolean;
   onClose: () => void;
@@ -1785,19 +1837,26 @@ function PurchaseFormSheet({
 function PurchaseGallery({
   item,
   user,
+  canManage,
   projectId,
+  workspaceId,
   rate,
   onClose,
   onChanged,
 }: {
   item: PurchaseItem;
-  user?: AppUser | null;
+  user?: PurchaseActor | null;
+  canManage: boolean;
   projectId: string;
+  /** The selected Project's actual workspaceId — never the caller's
+   *  defaultWorkspaceId, which would be wrong for a shared cross-workspace
+   *  Project. Every write below passes this through explicitly. */
+  workspaceId: string;
   rate: number;
   onClose: () => void;
   onChanged: () => void | Promise<void>;
 }) {
-  const canEdit = canManagePurchase(user, item);
+  const canEdit = canManage;
   const [index, setIndex] = useState(0);
   const photos = item.photos;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -1861,6 +1920,8 @@ function PurchaseGallery({
                     files,
                     user,
                     rate,
+                    undefined,
+                    workspaceId,
                   );
                   await onChanged();
                   e.target.value = "";
@@ -1885,6 +1946,7 @@ function PurchaseGallery({
                         { coverImageUrl: photos[index].url },
                         user,
                         rate,
+                        workspaceId,
                       );
                       await onChanged();
                     }}
@@ -1901,6 +1963,7 @@ function PurchaseGallery({
                         photos[index].id,
                         user,
                         rate,
+                        workspaceId,
                       );
                       setIndex(0);
                       await onChanged();
@@ -1922,6 +1985,7 @@ function PurchaseGallery({
                           { photos: next },
                           user,
                           rate,
+                          workspaceId,
                         );
                         setIndex(index - 1);
                         await onChanged();
@@ -1944,6 +2008,7 @@ function PurchaseGallery({
                           { photos: next },
                           user,
                           rate,
+                          workspaceId,
                         );
                         setIndex(index + 1);
                         await onChanged();

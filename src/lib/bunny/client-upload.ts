@@ -291,7 +291,11 @@ export async function fetchBunnyPlayback(input: {
       data.error || "Your video session expired. Press Play to continue.",
     );
   }
-  return data as { embedUrl: string; expires: number };
+  return data as {
+    embedUrl: string;
+    expires: number;
+    thumbnailUrl?: string | null;
+  };
 }
 
 /** Upload one video file via Bunny TUS and mark processing. */

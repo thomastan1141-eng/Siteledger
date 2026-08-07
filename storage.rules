@@ -5,141 +5,323 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function memberDoc(workspaceId) {
-      return firestore.get(/databases/(default)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid));
-    }
-
-    function isWorkspaceOwner(workspaceId) {
-      return signedIn()
-        && memberDoc(workspaceId).exists
-        && memberDoc(workspaceId).data.status == 'ACTIVE'
-        && memberDoc(workspaceId).data.role == 'OWNER';
-    }
-
-    function companyUserDoc(companyId) {
-      return firestore.get(/databases/(default)/documents/companies/$(companyId)/users/$(request.auth.uid));
-    }
-
-    function isCompanyAdmin(companyId) {
-      return signedIn()
-        && companyUserDoc(companyId).data.active == true
-        && companyUserDoc(companyId).data.role == 'admin';
-    }
-
-    function isTenantAdmin(companyId) {
-      return isCompanyAdmin(companyId) || isWorkspaceOwner(companyId);
-    }
-
-    function isClient(companyId) {
-      return signedIn()
-        && companyUserDoc(companyId).data.active == true
-        && companyUserDoc(companyId).data.role == 'client';
+    // Cross-service reads into Firestore — mirrors firestore.rules access
+    // logic exactly: creator OR ACTIVE membership only. Company admin and
+    // workspace owner grant no Project authority here.
+    function projectExists(companyId, projectId) {
+      return firestore.exists(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId));
     }
 
     function projectData(companyId, projectId) {
       return firestore.get(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)).data;
     }
 
-    function projectMemberDoc(companyId, projectId) {
-      return firestore.get(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)/members/$(request.auth.uid));
-    }
-
     function projectNotTrashed(companyId, projectId) {
-      return !('status' in projectData(companyId, projectId))
-        || !(projectData(companyId, projectId).status in ['trashed', 'purging']);
-    }
-
-    function isClientOnProject(companyId, projectId) {
-      return isClient(companyId)
-        && request.auth.uid in projectData(companyId, projectId).get('clientUserIds', [])
-        && projectMemberDoc(companyId, projectId).exists
-        && projectMemberDoc(companyId, projectId).data.get('status', '') == 'ACTIVE';
-    }
-
-    function isAssignedStaffOnProject(companyId, projectId) {
-      return signedIn()
-        && request.auth.uid in projectData(companyId, projectId).get('staffIds', [])
-        && projectMemberDoc(companyId, projectId).exists
-        && projectMemberDoc(companyId, projectId).data.get('status', '') == 'ACTIVE';
+      return projectExists(companyId, projectId)
+        && (
+          !('status' in projectData(companyId, projectId))
+          || !(projectData(companyId, projectId).status in ['trashed', 'purging'])
+        );
     }
 
     function isProjectCreator(companyId, projectId) {
       return signedIn()
+        && projectExists(companyId, projectId)
         && projectData(companyId, projectId).get('createdBy', '') == request.auth.uid;
     }
 
-    function canAccessProjectFiles(companyId, projectId) {
-      return isTenantAdmin(companyId)
-        || isProjectCreator(companyId, projectId)
-        || isAssignedStaffOnProject(companyId, projectId);
+    function memberExists(companyId, projectId) {
+      return firestore.exists(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)/members/$(request.auth.uid));
     }
 
-    function canWritePhoto() {
-      return request.resource.size < 200 * 1024 * 1024
+    function memberData(companyId, projectId) {
+      return firestore.get(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)/members/$(request.auth.uid)).data;
+    }
+
+    function isActiveMember(companyId, projectId) {
+      return signedIn()
+        && memberExists(companyId, projectId)
+        && memberData(companyId, projectId).get('status', '') == 'ACTIVE';
+    }
+
+    // Mirror firestore.rules: arrays are discovery indexes; ACTIVE member
+    // docs are authoritative. Both must agree.
+    function projectStaffIds(companyId, projectId) {
+      return projectData(companyId, projectId).get('staffIds', []);
+    }
+
+    function projectClientUserIds(companyId, projectId) {
+      return projectData(companyId, projectId).get('clientUserIds', []);
+    }
+
+    // Client is a Project-specific member type — never companies/{id}/users.role.
+    function isClientOnProject(companyId, projectId) {
+      return isActiveMember(companyId, projectId)
+        && request.auth.uid in projectClientUserIds(companyId, projectId)
+        && memberData(companyId, projectId).get('memberType', '') == 'CLIENT';
+    }
+
+    function isColleagueOnProject(companyId, projectId) {
+      return isActiveMember(companyId, projectId)
+        && request.auth.uid in projectStaffIds(companyId, projectId)
+        && memberData(companyId, projectId).get('memberType', '') != 'CLIENT';
+    }
+
+    function memberPreset(companyId, projectId) {
+      return memberData(companyId, projectId).get('permissionPreset', '');
+    }
+
+    function memberPermission(companyId, projectId, perm) {
+      return memberData(companyId, projectId)
+        .get('permissions', {})
+        .get(perm, false) == true;
+    }
+
+    function isOwnerMember(companyId, projectId) {
+      return memberPreset(companyId, projectId) == 'OWNER'
+        || memberData(companyId, projectId).get('memberType', '') == 'OWNER';
+    }
+
+    // Preset/permission-aware Media access — do not give every Colleague
+    // full Storage access. VIEW_ONLY never uploads or deletes; UPDATE_PROGRESS
+    // may upload but not bulk-delete (own/all Media delete is authoritative
+    // on the Firestore doc, not the raw Storage object); EDITOR gets full
+    // Media access but never manages Access or the Project itself.
+    function canColleagueViewMedia(companyId, projectId) {
+      return isColleagueOnProject(companyId, projectId)
         && (
-          request.resource.contentType.matches('image/.*')
-          || request.resource.contentType == 'application/pdf'
+          isOwnerMember(companyId, projectId)
+          || memberPermission(companyId, projectId, 'viewMedia')
+          || memberPreset(companyId, projectId) in ['VIEW_ONLY', 'UPDATE_PROGRESS', 'EDITOR']
         );
     }
 
-    match /companies/{companyId}/projects/{projectId}/updates/{date}/{folder}/{fileName} {
+    function canColleagueUploadMedia(companyId, projectId) {
+      return isColleagueOnProject(companyId, projectId)
+        && (
+          isOwnerMember(companyId, projectId)
+          || memberPermission(companyId, projectId, 'uploadMedia')
+          || memberPreset(companyId, projectId) in ['UPDATE_PROGRESS', 'EDITOR']
+        );
+    }
+
+    function canColleagueDeleteMedia(companyId, projectId) {
+      return isColleagueOnProject(companyId, projectId)
+        && (
+          isOwnerMember(companyId, projectId)
+          || memberPermission(companyId, projectId, 'deleteAllMedia')
+          || memberPreset(companyId, projectId) == 'EDITOR'
+        );
+    }
+
+    function canColleagueEditAllMedia(companyId, projectId) {
+      return isColleagueOnProject(companyId, projectId)
+        && (
+          isOwnerMember(companyId, projectId)
+          || memberPermission(companyId, projectId, 'editAllMedia')
+          || memberPreset(companyId, projectId) == 'EDITOR'
+        );
+    }
+
+    function canColleagueEditOwnMedia(companyId, projectId) {
+      return isColleagueOnProject(companyId, projectId)
+        && (
+          memberPermission(companyId, projectId, 'editOwnMedia')
+          || memberPreset(companyId, projectId) in ['UPDATE_PROGRESS', 'EDITOR']
+        )
+        && resource.metadata.get('uploadedBy', '') == request.auth.uid;
+    }
+
+    function canColleagueDeleteOwnMedia(companyId, projectId) {
+      return isColleagueOnProject(companyId, projectId)
+        && (
+          memberPermission(companyId, projectId, 'deleteOwnMedia')
+          || memberPreset(companyId, projectId) in ['UPDATE_PROGRESS', 'EDITOR']
+        )
+        && resource.metadata.get('uploadedBy', '') == request.auth.uid;
+    }
+
+    function canPublishToClient(companyId, projectId) {
+      return isProjectCreator(companyId, projectId)
+        || (
+          isColleagueOnProject(companyId, projectId)
+          && projectData(companyId, projectId).get('allowStaffPublish', false) == true
+          && (
+            memberPermission(companyId, projectId, 'publishMediaToClient')
+            || memberPreset(companyId, projectId) == 'EDITOR'
+          )
+        );
+    }
+
+    function purchaseExists(companyId, projectId, purchaseId) {
+      return firestore.exists(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)/purchases/$(purchaseId));
+    }
+
+    function purchaseData(companyId, projectId, purchaseId) {
+      return firestore.get(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)/purchases/$(purchaseId)).data;
+    }
+
+    // Client may only READ photos for OWNER-responsibility Purchases.
+    // No Client create/update/delete of Purchase photos.
+    function clientCanReadPurchasePhotos(companyId, projectId, purchaseId) {
+      return isClientOnProject(companyId, projectId)
+        && purchaseExists(companyId, projectId, purchaseId)
+        && purchaseData(companyId, projectId, purchaseId)
+          .get('purchaseResponsibility', 'STUDIO') == 'OWNER';
+    }
+
+    // Legacy Media objects uploaded before customMetadata.clientVisible:
+    // photos/handover paths were the client-facing folders; internal stays private.
+    function clientCanReadMediaObject(companyId, projectId, kind) {
+      return isClientOnProject(companyId, projectId)
+        && (
+          resource.metadata.get('clientVisible', '') == 'true'
+          || (
+            !('clientVisible' in resource.metadata)
+            && kind in ['photos', 'handover']
+          )
+        );
+    }
+
+    function mediaUploadMetadataValid(companyId, projectId) {
+      return request.resource.metadata.get('uploadedBy', '') == request.auth.uid
+        && request.resource.metadata.get('mediaId', '').size() > 0
+        && request.resource.metadata.get('projectId', '') == projectId
+        && request.resource.metadata.get('workspaceId', '') == companyId
+        && request.resource.metadata.keys().hasAll([
+          'mediaId', 'clientVisible', 'uploadedBy', 'projectId', 'workspaceId'
+        ]);
+    }
+
+    // Non-Media project assets (cover photo, 3D tour stills) follow the
+    // broader editProjectDetails grant — only Editor/Owner colleagues.
+    function canColleagueEditProjectAssets(companyId, projectId) {
+      return isColleagueOnProject(companyId, projectId)
+        && (
+          isOwnerMember(companyId, projectId)
+          || memberPermission(companyId, projectId, 'editProjectDetails')
+          || memberPreset(companyId, projectId) == 'EDITOR'
+        );
+    }
+
+    function canColleagueViewPurchases(companyId, projectId) {
+      return isColleagueOnProject(companyId, projectId)
+        && (
+          isOwnerMember(companyId, projectId)
+          || memberPermission(companyId, projectId, 'viewPurchases')
+          || memberPreset(companyId, projectId) in ['VIEW_ONLY', 'UPDATE_PROGRESS', 'EDITOR']
+        );
+    }
+
+    function canColleagueEditPurchases(companyId, projectId) {
+      return isColleagueOnProject(companyId, projectId)
+        && (
+          isOwnerMember(companyId, projectId)
+          || memberPermission(companyId, projectId, 'editPurchases')
+          || memberPreset(companyId, projectId) == 'EDITOR'
+        );
+    }
+
+    function isImageOrPdf() {
+      return request.resource.contentType.matches('image/.*')
+        || request.resource.contentType == 'application/pdf'
+        || request.resource.contentType.matches('video/.*');
+    }
+
+    // companies/{companyId}/projects/{projectId}/updates/{date}/{kind}/{fileName}
+    // kind: photos | videos | internal | handover | documents
+    match /companies/{companyId}/projects/{projectId}/updates/{date}/{kind}/{fileName} {
       allow read: if projectNotTrashed(companyId, projectId)
         && (
-          canAccessProjectFiles(companyId, projectId)
-          || (isClientOnProject(companyId, projectId) && folder in ['photos', 'handover'])
+          isProjectCreator(companyId, projectId)
+          || canColleagueViewMedia(companyId, projectId)
+          || clientCanReadMediaObject(companyId, projectId, kind)
         );
-      allow write: if projectNotTrashed(companyId, projectId)
-        && canAccessProjectFiles(companyId, projectId)
-        && canWritePhoto();
+      allow create: if projectNotTrashed(companyId, projectId)
+        && (
+          isProjectCreator(companyId, projectId)
+          || canColleagueUploadMedia(companyId, projectId)
+        )
+        && mediaUploadMetadataValid(companyId, projectId)
+        && (
+          request.resource.metadata.get('clientVisible', '') != 'true'
+          || canPublishToClient(companyId, projectId)
+        )
+        && request.resource.size < 500 * 1024 * 1024
+        && isImageOrPdf();
+      allow update: if projectNotTrashed(companyId, projectId)
+        && (
+          isProjectCreator(companyId, projectId)
+          || canColleagueEditAllMedia(companyId, projectId)
+          || canColleagueEditOwnMedia(companyId, projectId)
+        )
+        && request.resource.metadata.get('uploadedBy', '')
+          == resource.metadata.get('uploadedBy', '')
+        && request.resource.metadata.get('mediaId', '')
+          == resource.metadata.get('mediaId', '')
+        && request.resource.metadata.get('projectId', '') == projectId
+        && request.resource.metadata.get('workspaceId', '') == companyId
+        && (
+          request.resource.metadata.get('clientVisible', '') != 'true'
+          || resource.metadata.get('clientVisible', '') == 'true'
+          || canPublishToClient(companyId, projectId)
+        )
+        && request.resource.size < 500 * 1024 * 1024
+        && isImageOrPdf();
+      allow delete: if isProjectCreator(companyId, projectId)
+        || canColleagueDeleteMedia(companyId, projectId)
+        || canColleagueDeleteOwnMedia(companyId, projectId);
     }
 
+    // companies/{companyId}/projects/{projectId}/purchases/{purchaseId}/photos/{fileName}
+    match /companies/{companyId}/projects/{projectId}/purchases/{purchaseId}/photos/{fileName} {
+      allow read: if isProjectCreator(companyId, projectId)
+        || canColleagueViewPurchases(companyId, projectId)
+        || clientCanReadPurchasePhotos(companyId, projectId, purchaseId);
+      allow create, update: if (
+          isProjectCreator(companyId, projectId)
+          || canColleagueEditPurchases(companyId, projectId)
+        )
+        && request.resource.metadata.get('uploadedBy', '') == request.auth.uid
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isProjectCreator(companyId, projectId)
+        || canColleagueEditPurchases(companyId, projectId);
+    }
+
+    // companies/{companyId}/projects/{projectId}/3d/{fileName}
     match /companies/{companyId}/projects/{projectId}/3d/{fileName} {
-      allow read: if canAccessProjectFiles(companyId, projectId)
+      allow read: if isProjectCreator(companyId, projectId)
+        || canColleagueEditProjectAssets(companyId, projectId)
         || isClientOnProject(companyId, projectId);
-      allow write: if canAccessProjectFiles(companyId, projectId)
+      allow write: if (
+          isProjectCreator(companyId, projectId)
+          || canColleagueEditProjectAssets(companyId, projectId)
+        )
         && request.resource.size < 50 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
-    match /companies/{companyId}/projects/{projectId}/cover/{fileName} {
-      allow read: if canAccessProjectFiles(companyId, projectId)
-        || isClientOnProject(companyId, projectId);
-      allow write: if canAccessProjectFiles(companyId, projectId)
-        && request.resource.size < 20 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-    }
-
-    match /companies/{companyId}/projects/{projectId}/purchases/{purchaseId}/photos/{fileName} {
-      allow read: if canAccessProjectFiles(companyId, projectId)
-        || isClientOnProject(companyId, projectId);
+    // companies/{workspaceId}/projects/{projectId}/cover/{fileName} — primary root.
+    match /companies/{workspaceId}/projects/{projectId}/cover/{fileName} {
+      allow read: if isProjectCreator(workspaceId, projectId)
+        || canColleagueEditProjectAssets(workspaceId, projectId)
+        || isClientOnProject(workspaceId, projectId);
       allow write: if (
-          canAccessProjectFiles(companyId, projectId)
-          || isClientOnProject(companyId, projectId)
+          isProjectCreator(workspaceId, projectId)
+          || canColleagueEditProjectAssets(workspaceId, projectId)
         )
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
-      allow delete: if canAccessProjectFiles(companyId, projectId)
-        || isClientOnProject(companyId, projectId);
     }
 
+    // workspaces/{workspaceId}/projects/{projectId}/cover/{fileName} — legacy
+    // dual-read root; no new writes expected, kept readable for old URLs.
     match /workspaces/{workspaceId}/projects/{projectId}/cover/{fileName} {
-      allow read: if canAccessProjectFiles(workspaceId, projectId)
+      allow read: if isProjectCreator(workspaceId, projectId)
+        || canColleagueEditProjectAssets(workspaceId, projectId)
         || isClientOnProject(workspaceId, projectId);
-      allow write: if canAccessProjectFiles(workspaceId, projectId)
-        && request.resource.size < 20 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
-    }
-
-    match /workspaces/{workspaceId}/projects/{projectId}/journal/{fileName} {
-      allow read: if canAccessProjectFiles(workspaceId, projectId);
-      allow write: if canAccessProjectFiles(workspaceId, projectId)
-        && canWritePhoto();
-    }
-
-    match /workspaces/{workspaceId}/projects/{projectId}/purchases/{purchaseId}/{fileName} {
-      allow read: if canAccessProjectFiles(workspaceId, projectId)
-        || isClientOnProject(workspaceId, projectId);
-      allow write: if canAccessProjectFiles(workspaceId, projectId)
+      allow write: if isProjectCreator(workspaceId, projectId)
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }

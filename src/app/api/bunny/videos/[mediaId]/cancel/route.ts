@@ -42,11 +42,7 @@ export async function POST(
       return NextResponse.json({ ok: true });
     }
     const data = snap.data() || {};
-    if (
-      data.uploadedBy !== user.uid &&
-      ctx.role !== "admin" &&
-      ctx.role !== "owner"
-    ) {
+    if (data.uploadedBy !== user.uid && ctx.role !== "owner") {
       return NextResponse.json(
         { error: "You do not have permission to cancel this upload." },
         { status: 403 },

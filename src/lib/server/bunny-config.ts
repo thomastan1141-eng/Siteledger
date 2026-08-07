@@ -29,4 +29,10 @@ export const bunnyConfig = {
   get embedTokenKey() {
     return requireEnv("BUNNY_STREAM_EMBED_TOKEN_KEY");
   },
+  /** Pull Zone token-authentication key for direct MP4/HLS assets. This is
+   * distinct from the Stream embed token key. Downloads fail closed when it
+   * is not configured. */
+  get cdnTokenKey() {
+    return requireEnv("BUNNY_STREAM_CDN_TOKEN_KEY");
+  },
 };

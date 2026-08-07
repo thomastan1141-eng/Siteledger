@@ -164,20 +164,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const emailVerified = AUTH_BYPASS ? true : Boolean(user?.emailVerified);
-  const needsEmailVerification = Boolean(
-    user &&
-      !emailVerified &&
-      !(
-        profile?.active &&
-        (profile.role === "admin" ||
-          profile.role === "staff" ||
-          profile.role === "client")
-      ),
-  );
+  // users/{uid}.role is legacy data only — it must never gate verification,
+  // onboarding, or routing. Every account is a normal USER.
+  const needsEmailVerification = Boolean(user && !emailVerified);
   const needsOnboarding = Boolean(
     user &&
       !needsEmailVerification &&
-      profile?.role !== "client" &&
       (!profile || profile.onboardingComplete === false),
   );
   const needsPasswordChange = Boolean(
@@ -402,10 +394,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             pending = {};
           }
         }
+        // Never request legacy migration from the client. A normal new USER
+        // must never receive legacy admin Project access — the server only
+        // ever migrates legacy siteledger Projects for the actual bootstrap
+        // admin (isLegacyAdmin), decided server-side, never by client flag.
         const result = await completeOnboardingClient(token, {
           studioName: input?.studioName || pending.studioName,
           displayName: input?.displayName || pending.displayName,
-          migrateLegacy: true,
         });
         if (typeof window !== "undefined") {
           window.sessionStorage.removeItem("siteledger.pendingSignup");

@@ -12,8 +12,7 @@ import {
   SiteSpinner,
 } from "@/components/progress/primitives";
 import { useAuth } from "@/lib/auth-context";
-import { useWorkspace } from "@/lib/workspace-context";
-import { listProjects } from "@/lib/services/projects";
+import { fetchMyProjects, type MyProject } from "@/lib/services/projects";
 import {
   listWorkspaceInvitations,
   revokeInvitation,
@@ -22,18 +21,17 @@ import {
   type PendingInvitationSummary,
   type WorkspaceMemberSummary,
 } from "@/lib/services/invites";
-import {
-  COLLEAGUE_PERMISSION_KEYS,
-  COLLEAGUE_PERMISSION_LABELS,
-  permissionsForPreset,
-} from "@/lib/permissions";
+import { permissionsForPreset } from "@/lib/permissions";
 import type {
   ColleaguePermissions,
   ColleaguePreset,
   InviteType,
-  Project,
 } from "@/lib/types";
 import { getProjectDisplayTitle } from "@/lib/utils";
+
+// New shares are limited to the three current presets — CUSTOM stays
+// readable for historical records only, never selectable here.
+const SHARE_PRESETS: ColleaguePreset[] = ["VIEW_ONLY", "UPDATE_PROGRESS", "EDITOR"];
 
 type FormState = {
   inviteType: InviteType;
@@ -57,11 +55,11 @@ function emptyForm(projectId = ""): FormState {
 
 export default function ProjectAccessPage() {
   const { profile } = useAuth();
-  const { workspaceId } = useWorkspace();
   const searchParams = useSearchParams();
   const formKey = useId();
   const [formInstance, setFormInstance] = useState(0);
-  const [projects, setProjects] = useState<Project[]>([]);
+  // Access management lists only Projects created by the current USER.
+  const [projects, setProjects] = useState<MyProject[]>([]);
   const [members, setMembers] = useState<WorkspaceMemberSummary[]>([]);
   const [pendingInvitations, setPendingInvitations] = useState<
     PendingInvitationSummary[]
@@ -76,29 +74,27 @@ export default function ProjectAccessPage() {
     emptyForm(initialProjectId),
   );
 
-  const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "";
-
   const filteredMembers = useMemo(() => {
     if (!form.projectId) return members;
     return members.filter((m) => m.projectId === form.projectId);
   }, [members, form.projectId]);
 
-  async function reload(tenant: string) {
+  async function reload() {
     const [projectList, invites] = await Promise.all([
-      listProjects({ workspaceId: tenant }),
-      listWorkspaceInvitations(tenant),
+      fetchMyProjects(),
+      listWorkspaceInvitations(),
     ]);
-    setProjects(projectList);
+    setProjects(projectList.filter((p) => p.isOwner));
     setMembers(invites.members);
     setPendingInvitations(invites.pendingInvitations);
   }
 
   useEffect(() => {
-    if (profile?.role !== "admin" || !ws) return;
+    if (!profile?.uid) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async access reload
     setLoading(true);
-    void reload(ws).finally(() => setLoading(false));
-  }, [profile, ws]);
+    void reload().finally(() => setLoading(false));
+  }, [profile?.uid]);
 
   useEffect(() => {
     const fromQuery = searchParams.get("projectId") || "";
@@ -107,14 +103,6 @@ export default function ProjectAccessPage() {
       prev.projectId === fromQuery ? prev : { ...prev, projectId: fromQuery },
     );
   }, [searchParams]);
-
-  if (profile?.role !== "admin") {
-    return (
-      <p style={{ color: "var(--site-text-secondary)" }}>
-        Only administrators can manage project access.
-      </p>
-    );
-  }
 
   if (loading) return <SiteSpinner />;
 
@@ -130,13 +118,6 @@ export default function ProjectAccessPage() {
     }));
   }
 
-  function togglePermission(key: keyof ColleaguePermissions) {
-    setForm((prev) => ({
-      ...prev,
-      permissions: { ...prev.permissions, [key]: !prev.permissions[key] },
-    }));
-  }
-
   function resetForm(keepProjectId = true) {
     setForm(emptyForm(keepProjectId ? form.projectId : ""));
     setFormInstance((n) => n + 1);
@@ -146,12 +127,14 @@ export default function ProjectAccessPage() {
     e.preventDefault();
     setError("");
     setSuccess("");
-    if (!ws) {
-      setError("Workspace is not ready yet. Refresh the page and try again.");
-      return;
-    }
     if (!form.projectId) {
       setError("Select a project before sharing.");
+      return;
+    }
+    const project = projects.find((p) => p.id === form.projectId);
+    const projectWorkspaceId = project?.workspaceId || project?.companyId || "";
+    if (!projectWorkspaceId) {
+      setError("Workspace is not ready yet. Refresh the page and try again.");
       return;
     }
     if (!form.inviteeEmail.trim()) {
@@ -161,28 +144,22 @@ export default function ProjectAccessPage() {
     setBusy(true);
     try {
       const result = await shareProjectAccess({
-        workspaceId: ws,
+        workspaceId: projectWorkspaceId,
         projectId: form.projectId,
         inviteType: form.inviteType,
         email: form.inviteeEmail,
         displayName: form.inviteeDisplayName,
         colleaguePreset:
           form.inviteType === "COLLEAGUE" ? form.colleaguePreset : undefined,
-        permissions:
-          form.inviteType === "COLLEAGUE" && form.colleaguePreset === "CUSTOM"
-            ? form.permissions
-            : undefined,
       });
-      const projectTitle =
-        getProjectDisplayTitle(projects.find((p) => p.id === form.projectId)) ||
-        "Project";
+      const projectTitle = getProjectDisplayTitle(project) || "Project";
       setSuccess(
         result.alreadyShared
           ? `${result.email} already has access to ${projectTitle}.`
           : `Shared ${projectTitle} with ${result.email}. Access is active immediately.`,
       );
       resetForm(true);
-      await reload(ws);
+      await reload();
     } catch (err) {
       setError(
         err instanceof Error
@@ -194,17 +171,23 @@ export default function ProjectAccessPage() {
     }
   }
 
+  function workspaceIdForProject(projectId: string) {
+    const project = projects.find((p) => p.id === projectId);
+    return project?.workspaceId || project?.companyId || "";
+  }
+
   async function onRevokeInvitation(invite: PendingInvitationSummary) {
-    if (!ws) return;
+    const projectWorkspaceId = workspaceIdForProject(invite.projectId);
+    if (!projectWorkspaceId) return;
     if (!confirm(`Revoke the legacy invitation to ${invite.email}?`)) return;
     setRowBusyId(invite.id);
     try {
       await revokeInvitation({
-        workspaceId: ws,
+        workspaceId: projectWorkspaceId,
         projectId: invite.projectId,
         invitationId: invite.id,
       });
-      await reload(ws);
+      await reload();
     } catch (err) {
       alert(
         err instanceof Error ? err.message : "We could not revoke this invitation.",
@@ -215,17 +198,18 @@ export default function ProjectAccessPage() {
   }
 
   async function onRevokeMember(member: WorkspaceMemberSummary) {
-    if (!ws) return;
+    const projectWorkspaceId = workspaceIdForProject(member.projectId);
+    if (!projectWorkspaceId) return;
     if (!confirm(`Remove access for ${member.displayName || member.email}?`))
       return;
     setRowBusyId(member.uid + member.projectId);
     try {
       await revokeMemberAccess({
-        workspaceId: ws,
+        workspaceId: projectWorkspaceId,
         projectId: member.projectId,
         uid: member.uid,
       });
-      await reload(ws);
+      await reload();
     } catch (err) {
       alert(err instanceof Error ? err.message : "We could not revoke this access.");
     } finally {
@@ -347,27 +331,17 @@ export default function ProjectAccessPage() {
                     onPresetChange(e.target.value as ColleaguePreset)
                   }
                 >
-                  <option value="VIEW_ONLY">View only</option>
-                  <option value="UPDATE_PROGRESS">Update progress</option>
-                  <option value="EDITOR">Editor</option>
-                  <option value="CUSTOM">Custom</option>
+                  {SHARE_PRESETS.map((preset) => (
+                    <option key={preset} value={preset}>
+                      {preset === "VIEW_ONLY"
+                        ? "View only"
+                        : preset === "UPDATE_PROGRESS"
+                          ? "Update progress"
+                          : "Editor"}
+                    </option>
+                  ))}
                 </SiteSelect>
               </SiteField>
-
-              {form.colleaguePreset === "CUSTOM" ? (
-                <div className="site-stage-check-grid" style={{ marginTop: 12 }}>
-                  {COLLEAGUE_PERMISSION_KEYS.map((key) => (
-                    <label key={key} className="site-stage-check">
-                      <input
-                        type="checkbox"
-                        checked={form.permissions[key]}
-                        onChange={() => togglePermission(key)}
-                      />
-                      <span>{COLLEAGUE_PERMISSION_LABELS[key]}</span>
-                    </label>
-                  ))}
-                </div>
-              ) : null}
             </div>
           ) : null}
 

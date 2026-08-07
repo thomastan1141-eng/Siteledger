@@ -76,7 +76,7 @@ export default function VerifyEmailPage() {
       !needsOnboarding &&
       profile?.onboardingComplete
     ) {
-      router.replace(profile.role === "client" ? "/client" : "/dashboard");
+      router.replace("/dashboard");
     }
   }, [
     loading,

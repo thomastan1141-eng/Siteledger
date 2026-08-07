@@ -44,7 +44,7 @@ export async function POST(
     if (data.provider !== "BUNNY_STREAM") {
       return NextResponse.json({ error: "Media not found." }, { status: 404 });
     }
-    if (data.uploadedBy !== user.uid && ctx.role !== "admin" && ctx.role !== "owner") {
+    if (data.uploadedBy !== user.uid && ctx.role !== "owner") {
       return NextResponse.json(
         { error: "You do not have permission to update this upload." },
         { status: 403 },

@@ -44,7 +44,7 @@ export default function SetPasswordPage() {
       return;
     }
     if (!needsPasswordChange) {
-      router.replace(profile?.role === "client" ? "/client" : "/dashboard");
+      router.replace("/dashboard");
     }
   }, [loading, user, needsPasswordChange, profile, router]);
 
@@ -82,7 +82,7 @@ export default function SetPasswordPage() {
         profile?.companyId || profile?.defaultWorkspaceId,
       );
       await refreshProfile();
-      router.replace(profile?.role === "client" ? "/client" : "/dashboard");
+      router.replace("/dashboard");
     } catch (err) {
       if (process.env.NODE_ENV === "development") {
         console.error("[setPassword]", err);

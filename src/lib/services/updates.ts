@@ -11,7 +11,7 @@ import {
 import { getFirebaseDb } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_UPDATES } from "../demo";
-import { requireTenantId, updatesPath } from "../paths";
+import { mediaPath, requireTenantId, updatesPath } from "../paths";
 import { sanitizeForFirestore } from "../sanitize";
 import { todayKey } from "../utils";
 import {
@@ -66,19 +66,24 @@ export async function listUpdates(
   }
 
   const workspaceId = requireTenantId(options?.workspaceId);
-  const q = query(
-    collection(getFirebaseDb(), updatesPath(projectId, workspaceId)),
-    orderBy("createdAt", "desc"),
-  );
+  // Query excludes non-client-visible entries directly, matching the
+  // Firestore Rule for a Client member — Rules deny the whole list request
+  // if any candidate document wouldn't satisfy the per-document check.
+  const q = options?.clientOnly
+    ? query(
+        collection(getFirebaseDb(), updatesPath(projectId, workspaceId)),
+        where("visibility", "==", "client_visible"),
+        orderBy("createdAt", "desc"),
+      )
+    : query(
+        collection(getFirebaseDb(), updatesPath(projectId, workspaceId)),
+        orderBy("createdAt", "desc"),
+      );
   const snap = await getDocs(q);
-  let updates = snap.docs.map(
+  const updates = snap.docs.map(
     (d) =>
       ({ id: d.id, ...(d.data() as Omit<DailyUpdate, "id">) }) as DailyUpdate,
   );
-
-  if (options?.clientOnly) {
-    updates = updates.filter((u) => u.visibility === "client_visible");
-  }
 
   return updates.sort((a, b) => {
     if (a.date === b.date) return b.createdAt.localeCompare(a.createdAt);
@@ -198,30 +203,39 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
       continue;
     }
 
+    const mediaRef = doc(
+      collection(getFirebaseDb(), mediaPath(input.projectId, workspaceId)),
+    );
     const uploaded = await uploadMediaFile(input.projectId, file, {
       date,
       visibility: mediaVisibility,
       workspaceId,
+      uploadedBy: input.createdBy,
+      mediaId: mediaRef.id,
       onProgress: (pct) => input.onFileProgress?.(file.name, pct),
     });
 
-    const media = await createMediaRecord(input.projectId, {
-      type: uploaded.type,
-      provider: "FIREBASE_STORAGE",
-      workspaceId,
-      storagePath: uploaded.storagePath,
-      downloadUrl: uploaded.downloadUrl,
-      fileName: uploaded.fileName,
-      contentType: uploaded.contentType,
-      sizeBytes: uploaded.sizeBytes,
-      workItems: [...input.workItems, ...input.customActivities],
-      caption: input.note,
-      visibility: mediaVisibility,
-      clientVisible: mediaVisibility === "client_visible",
-      uploadedBy: input.createdBy,
-      uploadedByName: input.createdByName,
-      date,
-    });
+    const media = await createMediaRecord(
+      input.projectId,
+      {
+        type: uploaded.type,
+        provider: "FIREBASE_STORAGE",
+        workspaceId,
+        storagePath: uploaded.storagePath,
+        downloadUrl: uploaded.downloadUrl,
+        fileName: uploaded.fileName,
+        contentType: uploaded.contentType,
+        sizeBytes: uploaded.sizeBytes,
+        workItems: [...input.workItems, ...input.customActivities],
+        caption: input.note,
+        visibility: mediaVisibility,
+        clientVisible: mediaVisibility === "client_visible",
+        uploadedBy: input.createdBy,
+        uploadedByName: input.createdByName,
+        date,
+      },
+      mediaRef.id,
+    );
 
     mediaIds.push(media.id);
     storageBytes += uploaded.sizeBytes;

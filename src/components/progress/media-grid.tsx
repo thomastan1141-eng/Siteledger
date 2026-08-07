@@ -9,6 +9,7 @@ import {
   syncBunnyMedia,
 } from "@/lib/bunny/client-upload";
 import { setMediaClientVisible } from "@/lib/services/media";
+import { getFirebaseAuth } from "@/lib/firebase";
 import type { MediaItem } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 import { SiteButton, SiteEmpty, SitePill } from "./primitives";
@@ -32,6 +33,73 @@ function isClientVisible(item: MediaItem) {
     item.clientVisible === true ||
     item.visibility === "client_visible" ||
     item.visibility === "handover"
+  );
+}
+
+async function requestSecureMediaUrl(
+  item: MediaItem,
+  workspaceId?: string,
+): Promise<string> {
+  const user = getFirebaseAuth().currentUser;
+  const ws = workspaceId || item.workspaceId || item.companyId;
+  if (!user || !ws) throw new Error("Media access is unavailable.");
+  const token = await user.getIdToken();
+  const response = await fetch(`/api/media/${encodeURIComponent(item.id)}/download`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ projectId: item.projectId, workspaceId: ws }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as {
+    url?: string;
+    error?: string;
+  };
+  if (!response.ok || !payload.url) {
+    throw new Error(payload.error || "Media access is unavailable.");
+  }
+  return payload.url;
+}
+
+export function SecureStorageAsset({
+  item,
+  workspaceId,
+  video = false,
+  className,
+}: {
+  item: MediaItem;
+  workspaceId?: string;
+  video?: boolean;
+  className?: string;
+}) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    let active = true;
+    requestSecureMediaUrl(item, workspaceId)
+      .then((next) => {
+        if (active) setUrl(next);
+      })
+      .catch(() => {
+        if (active) setUrl("");
+      });
+    return () => {
+      active = false;
+    };
+  }, [item.id, item.projectId, item.workspaceId, item.companyId, workspaceId]);
+
+  if (!url) return <span>Loading…</span>;
+  if (video) {
+    return <video className={className} src={url} controls playsInline />;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      className={className}
+      src={url}
+      alt={item.caption || item.fileName}
+      loading="lazy"
+    />
   );
 }
 
@@ -293,24 +361,21 @@ export function ProgressMediaGrid({
               <VisibilityBadge item={item} />
               <VisibilityToggleButton item={item} />
               {item.type === "photo" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={item.downloadUrl}
-                  alt={item.caption || item.fileName}
-                  loading="lazy"
-                />
+                <SecureStorageAsset item={item} workspaceId={workspaceId} />
               ) : bunny ? (
                 <BunnyThumbnail
-                  src={item.thumbnailUrl}
+                  item={item}
+                  workspaceId={
+                    workspaceId || item.workspaceId || item.companyId
+                  }
                   alt={item.title || item.fileName || "Project video"}
                 />
               ) : (
                 <>
-                  <video
-                    src={item.downloadUrl}
-                    muted
-                    playsInline
-                    preload="metadata"
+                  <SecureStorageAsset
+                    item={item}
+                    workspaceId={workspaceId}
+                    video
                   />
                   <span className="site-media-tile-label">Video</span>
                 </>
@@ -362,11 +427,7 @@ export function ProgressMediaGrid({
           ) : null}
           <div className="site-lightbox-frame">
             {active.type === "photo" ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={active.downloadUrl}
-                alt={active.caption || active.fileName}
-              />
+              <SecureStorageAsset item={active} workspaceId={workspaceId} />
             ) : isBunnyVideo(active) ? (
               <div style={{ width: "min(960px, 100%)" }}>
                 <SecureBunnyPlayer
@@ -377,7 +438,11 @@ export function ProgressMediaGrid({
                 />
               </div>
             ) : (
-              <video src={active.downloadUrl} controls playsInline />
+              <SecureStorageAsset
+                item={active}
+                workspaceId={workspaceId}
+                video
+              />
             )}
             <div className="site-lightbox-meta">
               <div>
@@ -398,12 +463,24 @@ export function ProgressMediaGrid({
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {allowDownload &&
                 active.type === "photo" &&
-                active.downloadUrl ? (
-                  <a href={active.downloadUrl} target="_blank" rel="noreferrer">
-                    <SiteButton variant="soft" type="button">
-                      Download
-                    </SiteButton>
-                  </a>
+                active.storagePath ? (
+                  <SiteButton
+                    variant="soft"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const url = await requestSecureMediaUrl(
+                          active,
+                          workspaceId,
+                        );
+                        window.open(url, "_blank", "noopener,noreferrer");
+                      } catch {
+                        window.alert("Media download is unavailable.");
+                      }
+                    }}
+                  >
+                    Download
+                  </SiteButton>
                 ) : null}
                 {canManageVisibility ? (
                   <SiteButton

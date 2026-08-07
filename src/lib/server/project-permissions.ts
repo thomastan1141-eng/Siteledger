@@ -1,9 +1,13 @@
 import { getAdminDb } from "@/lib/firebase-admin";
-import { permissionsForPreset } from "@/lib/permissions";
-import type { ColleaguePermissions, ColleaguePreset } from "@/lib/types";
+import {
+  resolveEffectivePermissions,
+  resolveProjectForUser,
+} from "@/lib/server/project-directory";
+import type { ColleaguePermissions } from "@/lib/types";
 
 export type MediaAction =
   | "VIEW_MEDIA"
+  | "DOWNLOAD_MEDIA"
   | "UPLOAD_MEDIA"
   | "EDIT_MEDIA"
   | "DELETE_MEDIA"
@@ -13,15 +17,29 @@ export type ProjectPermissionContext = {
   uid: string;
   workspaceId: string;
   projectId: string;
-  role: "admin" | "staff" | "client" | "owner" | "none";
+  /** Project-scoped access kind — not users/{uid}.role, company admin, or
+   *  workspace owner. "owner" here means the Project creator only. */
+  role: "staff" | "client" | "owner" | "none";
   isStaffAssigned: boolean;
   isClientAssigned: boolean;
   allowStaffPublish: boolean;
   memberStatus: string | null;
+  memberType: string | null;
   permissionPreset: string | null;
   permissions: Partial<ColleaguePermissions> | null;
   isActiveMember: boolean;
+  isCreator: boolean;
 };
+
+export function isMediaClientVisible(
+  media: Record<string, unknown>,
+): boolean {
+  return (
+    media.clientVisible === true ||
+    media.visibility === "client_visible" ||
+    media.visibility === "handover"
+  );
+}
 
 async function loadProjectPermissionContext(
   uid: string,
@@ -35,25 +53,19 @@ async function loadProjectPermissionContext(
     ? await db.doc(`companies/${workspaceId}/projects/${projectId}`).get()
     : null;
 
+  // Never guess the workspace from the caller's defaultWorkspaceId/
+  // sharedWorkspaceIds/companyId profile fields — that bypasses the real
+  // ownership/ACTIVE-membership check and can cross-wire two workspaces
+  // that happen to reuse a projectId. Instead, resolve the exact Project
+  // the USER is authorized for (creator OR ACTIVE member), the same
+  // authoritative lookup the Projects list and /api/projects/resolve use.
   if (!projectSnap?.exists) {
-    const account = await db.doc(`users/${uid}`).get();
-    const shared = Array.isArray(account.data()?.sharedWorkspaceIds)
-      ? account.data()!.sharedWorkspaceIds.map(String)
-      : [];
-    const fallbackWs =
-      String(account.data()?.defaultWorkspaceId || "") ||
-      String(account.data()?.companyId || "") ||
-      "siteledger";
-    const candidates = Array.from(
-      new Set([workspaceId, fallbackWs, ...shared, "siteledger"].filter(Boolean)),
-    );
-    for (const ws of candidates) {
-      const snap = await db.doc(`companies/${ws}/projects/${projectId}`).get();
-      if (snap.exists) {
-        workspaceId = ws;
-        projectSnap = snap;
-        break;
-      }
+    const resolved = await resolveProjectForUser(uid, projectId, workspaceId || undefined);
+    if (resolved) {
+      workspaceId = resolved.workspaceId;
+      projectSnap = await db
+        .doc(`companies/${workspaceId}/projects/${projectId}`)
+        .get();
     }
   }
 
@@ -70,55 +82,29 @@ async function loadProjectPermissionContext(
     : [];
   const allowStaffPublish = Boolean(project.allowStaffPublish);
 
-  const [companyUser, account, workspaceMember, projectMember] =
-    await Promise.all([
-      db.doc(`companies/${workspaceId}/users/${uid}`).get(),
-      db.doc(`users/${uid}`).get(),
-      db.doc(`workspaces/${workspaceId}/members/${uid}`).get(),
-      db
-        .doc(`companies/${workspaceId}/projects/${projectId}/members/${uid}`)
-        .get(),
-    ]);
+  const projectMember = await db
+    .doc(`companies/${workspaceId}/projects/${projectId}/members/${uid}`)
+    .get();
 
   const memberData = projectMember.exists ? projectMember.data() || {} : null;
   const memberStatus = memberData ? String(memberData.status || "") : null;
+  const memberType = memberData ? String(memberData.memberType || "") : null;
   const isActiveMember = memberStatus === "ACTIVE";
   const inStaffIds = staffIds.includes(uid);
   const inClientIds = clientUserIds.includes(uid);
   const isCreator = project.createdBy === uid;
   // Dual gate for shared users: array index AND ACTIVE member.
-  // Project creators retain access without a member row.
+  // Project creators retain access without relying on users.role.
   const isStaffAssigned = (inStaffIds && isActiveMember) || isCreator;
-  const isClientAssigned = inClientIds && isActiveMember;
+  const isClientAssigned =
+    inClientIds && isActiveMember && memberType === "CLIENT";
 
-  const isOwner =
-    workspaceMember.exists &&
-    workspaceMember.data()?.role === "OWNER" &&
-    workspaceMember.data()?.status === "ACTIVE";
-  const isAdmin =
-    (companyUser.exists &&
-      companyUser.data()?.role === "admin" &&
-      companyUser.data()?.active !== false) ||
-    (account.exists &&
-      account.data()?.role === "admin" &&
-      (account.data()?.defaultWorkspaceId === workspaceId ||
-        account.data()?.companyId === workspaceId));
-  const companyRole = companyUser.exists
-    ? String(companyUser.data()?.role || "")
-    : "";
-  const isStaff =
-    companyUser.exists &&
-    companyRole === "staff" &&
-    companyUser.data()?.active !== false;
-  const isClient =
-    companyUser.exists &&
-    companyRole === "client" &&
-    companyUser.data()?.active !== false;
-
+  // The Project creator is the sole "owner". Company admin and workspace
+  // owner grant no Project authority — never checked here.
   let role: ProjectPermissionContext["role"] = "none";
-  if (isOwner || isAdmin) role = isOwner ? "owner" : "admin";
-  else if (isStaff) role = "staff";
-  else if (isClient) role = "client";
+  if (isCreator) role = "owner";
+  else if (isStaffAssigned && memberType !== "CLIENT") role = "staff";
+  else if (isClientAssigned) role = "client";
 
   const permissionPreset = memberData
     ? (memberData.permissionPreset as string) || null
@@ -127,17 +113,19 @@ async function loadProjectPermissionContext(
     memberData &&
     memberData.permissions &&
     typeof memberData.permissions === "object"
-      ? (memberData.permissions as Partial<ColleaguePermissions>)
+      ? (memberData.permissions as Record<string, unknown>)
       : null;
-  const permissions =
-    rawPermissions ||
-    (permissionPreset &&
-    permissionPreset !== "CLIENT" &&
-    permissionPreset !== "OWNER"
-      ? permissionsForPreset(permissionPreset as ColleaguePreset)
-      : permissionPreset === "OWNER"
-        ? permissionsForPreset("EDITOR")
-        : null);
+  // Single source of truth for preset -> permission-map resolution (also used
+  // by project-directory.ts for the Projects list / resolve API), so a
+  // Colleague's effective rights are identical everywhere they're checked.
+  const permissions = isCreator
+    ? null
+    : resolveEffectivePermissions({
+        isOwner: false,
+        memberType,
+        permissionPreset,
+        permissions: rawPermissions,
+      });
 
   return {
     uid,
@@ -148,9 +136,11 @@ async function loadProjectPermissionContext(
     isClientAssigned,
     allowStaffPublish,
     memberStatus,
+    memberType,
     permissionPreset,
     permissions,
     isActiveMember,
+    isCreator,
   };
 }
 
@@ -163,16 +153,17 @@ function colleagueAllows(
   return false;
 }
 
+// Only the Project creator has full control. Company admin, workspace
+// owner and a colleague's OWNER-preset membership (which only the creator's
+// own record uses) never substitute for creator identity here.
 function canManage(ctx: ProjectPermissionContext) {
-  return ctx.role === "owner" || ctx.role === "admin";
+  return ctx.isCreator;
 }
 
-function isActiveAssignedStaff(ctx: ProjectPermissionContext) {
+function isActiveAssignedColleague(ctx: ProjectPermissionContext) {
   if (canManage(ctx)) return true;
-  if (ctx.role !== "staff") return false;
-  // Creator retains manage-equivalent media access for their projects.
-  if (ctx.isStaffAssigned) return true;
-  return false;
+  if (!ctx.isStaffAssigned || ctx.memberType === "CLIENT") return false;
+  return true;
 }
 
 export async function assertProjectPermission(input: {
@@ -190,62 +181,60 @@ export async function assertProjectPermission(input: {
   );
 
   const canManageAll = canManage(ctx);
-  const canStaffAccess = isActiveAssignedStaff(ctx);
-  const canClientView = ctx.role === "client" && ctx.isClientAssigned;
+  const canColleagueAccess = isActiveAssignedColleague(ctx);
+  const canClientView = ctx.isClientAssigned;
   const isOwn =
     Boolean(input.uploadedBy) && input.uploadedBy === input.uid;
 
   switch (input.action) {
     case "VIEW_MEDIA": {
       if (canManageAll) return ctx;
-      if (canStaffAccess && colleagueAllows(ctx, "viewMedia")) return ctx;
-      if (canStaffAccess && canManageAll) return ctx;
+      if (canColleagueAccess && colleagueAllows(ctx, "viewMedia")) return ctx;
       if (canClientView) return ctx;
-      // Creator path: isStaffAssigned true via createdBy without colleague perms map
-      if (canStaffAccess && ctx.permissionPreset == null && ctx.memberStatus == null)
+      // Creator without a colleague permission map
+      if (ctx.isCreator) return ctx;
+      break;
+    }
+    case "DOWNLOAD_MEDIA": {
+      if (canManageAll) return ctx;
+      if (canColleagueAccess && colleagueAllows(ctx, "downloadMedia")) {
         return ctx;
+      }
+      if (canClientView) return ctx;
       break;
     }
     case "UPLOAD_MEDIA": {
       if (canManageAll) return ctx;
-      if (canStaffAccess && colleagueAllows(ctx, "uploadMedia")) return ctx;
-      if (canStaffAccess && ctx.permissionPreset == null && ctx.memberStatus == null)
-        return ctx;
+      if (canColleagueAccess && colleagueAllows(ctx, "uploadMedia")) return ctx;
+      if (ctx.isCreator) return ctx;
       break;
     }
     case "EDIT_MEDIA": {
       if (canManageAll) return ctx;
-      if (canStaffAccess && colleagueAllows(ctx, "editAllMedia")) return ctx;
-      if (canStaffAccess && isOwn && colleagueAllows(ctx, "editOwnMedia"))
+      if (canColleagueAccess && colleagueAllows(ctx, "editAllMedia")) return ctx;
+      if (canColleagueAccess && isOwn && colleagueAllows(ctx, "editOwnMedia"))
         return ctx;
-      if (canStaffAccess && ctx.permissionPreset == null && ctx.memberStatus == null)
-        return ctx;
+      if (ctx.isCreator) return ctx;
       break;
     }
     case "DELETE_MEDIA": {
       if (canManageAll) return ctx;
-      if (canStaffAccess && colleagueAllows(ctx, "deleteAllMedia")) return ctx;
-      if (canStaffAccess && isOwn && colleagueAllows(ctx, "deleteOwnMedia"))
+      if (canColleagueAccess && colleagueAllows(ctx, "deleteAllMedia"))
+        return ctx;
+      if (canColleagueAccess && isOwn && colleagueAllows(ctx, "deleteOwnMedia"))
         return ctx;
       break;
     }
     case "PUBLISH_TO_CLIENT": {
       if (canManageAll) return ctx;
       if (
-        canStaffAccess &&
+        canColleagueAccess &&
         ctx.allowStaffPublish &&
         colleagueAllows(ctx, "publishMediaToClient")
       ) {
         return ctx;
       }
-      if (
-        canStaffAccess &&
-        ctx.allowStaffPublish &&
-        ctx.permissionPreset == null &&
-        ctx.memberStatus == null
-      ) {
-        return ctx;
-      }
+      if (ctx.isCreator && ctx.allowStaffPublish) return ctx;
       break;
     }
     default:
@@ -271,15 +260,15 @@ export async function assertClientVisibleAllowed(
   if (!clientVisible) return;
   if (canManage(ctx)) return;
   if (
-    ctx.role === "staff" &&
+    ctx.isStaffAssigned &&
+    ctx.memberType !== "CLIENT" &&
     ctx.allowStaffPublish &&
-    (colleagueAllows(ctx, "publishMediaToClient") ||
-      (ctx.memberStatus == null && ctx.isStaffAssigned))
+    (colleagueAllows(ctx, "publishMediaToClient") || ctx.isCreator)
   ) {
     return;
   }
   throw Object.assign(
-    new Error("You do not have permission to publish client-visible media."),
+    new Error("You do not have permission to publish media to the client."),
     { status: 403 },
   );
 }

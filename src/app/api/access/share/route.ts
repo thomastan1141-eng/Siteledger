@@ -8,9 +8,20 @@ import type { ColleaguePreset, InviteType } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+// New shares are limited to these three presets. CUSTOM remains readable on
+// historical membership records but can never be selected for a new share.
+const ALLOWED_NEW_PRESETS: ColleaguePreset[] = [
+  "VIEW_ONLY",
+  "UPDATE_PROGRESS",
+  "EDITOR",
+];
+
 export async function POST(request: Request) {
   try {
     const user = await verifyAuthenticatedRequest(request);
+    if (!user.emailVerified) {
+      return NextResponse.json({ error: "Email not verified." }, { status: 403 });
+    }
     const body = (await request.json()) as Record<string, unknown>;
     const workspaceId = String(body.workspaceId || "").trim();
     const projectId = String(body.projectId || "").trim();
@@ -23,6 +34,20 @@ export async function POST(request: Request) {
       ? (String(body.colleaguePreset) as ColleaguePreset)
       : null;
 
+    if (
+      inviteType === "COLLEAGUE" &&
+      colleaguePreset &&
+      !ALLOWED_NEW_PRESETS.includes(colleaguePreset)
+    ) {
+      return NextResponse.json(
+        {
+          error: "Access level must be View only, Update progress, or Editor.",
+          code: "invalid_preset",
+        },
+        { status: 400 },
+      );
+    }
+
     const result = await shareProjectAccess({
       actorUid: user.uid,
       workspaceId,
@@ -32,10 +57,8 @@ export async function POST(request: Request) {
       displayName,
       colleaguePreset:
         inviteType === "COLLEAGUE" ? colleaguePreset || "VIEW_ONLY" : null,
-      permissions:
-        inviteType === "COLLEAGUE" && body.permissions
-          ? (body.permissions as Record<string, boolean>)
-          : null,
+      // CUSTOM permission overrides are never accepted for new shares.
+      permissions: null,
     });
 
     return NextResponse.json(result);

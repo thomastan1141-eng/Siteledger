@@ -303,7 +303,7 @@ export interface ScheduleItem {
   status: ScheduleStatus;
   /** Timeline bar color (hex). Falls back to status color when unset. */
   barColor?: string;
-  /** Client-visible when true (default true for migrated items) */
+  /** Client-visible when true or unset; explicitly false hides from Client. */
   clientVisible?: boolean;
   internalNotes?: string;
   /** Display order within the project */
@@ -333,6 +333,9 @@ export interface DailyPlan {
   /** yyyy-MM-dd in Asia/Singapore */
   date: string;
   items: DailyPlanWorkItem[];
+  /** Client-visible when true or unset; explicitly false hides from Client.
+   * Same backward-compatible model as Schedule. */
+  clientVisible?: boolean;
   reminder?: string;
   note?: string;
   createdAt: string;

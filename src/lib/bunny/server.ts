@@ -148,6 +148,28 @@ export function createEmbedPlayback(videoId: string, ttlSeconds = 300) {
   };
 }
 
+/**
+ * Creates a short-lived Bunny Pull Zone token-authenticated URL for one
+ * direct asset. The Pull Zone must have Token Authentication enabled with
+ * the same BUNNY_STREAM_CDN_TOKEN_KEY. Never expose an unsigned CDN URL.
+ */
+export function createSignedCdnUrl(
+  assetPath: string,
+  ttlSeconds = 300,
+): { url: string; expires: number } {
+  const libraryId = bunnyConfig.libraryId;
+  const normalizedPath = `/${assetPath.replace(/^\/+/, "")}`;
+  const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const token = createHash("sha256")
+    .update(`${bunnyConfig.cdnTokenKey}${normalizedPath}${expires}`)
+    .digest()
+    .toString("base64url");
+  return {
+    url: `https://vz-${libraryId}.b-cdn.net${normalizedPath}?token=${token}&expires=${expires}`,
+    expires,
+  };
+}
+
 export function verifyBunnyWebhookSignature(input: {
   rawBody: string;
   version: string | null;

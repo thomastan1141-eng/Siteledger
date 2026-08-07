@@ -4,21 +4,18 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { AUTH_BYPASS } from "@/lib/demo";
-import type { UserRole } from "@/lib/types";
 import { SiteSpinner } from "./progress/primitives";
 
-export function AuthGate({
-  children,
-  roles,
-}: {
-  children: React.ReactNode;
-  roles: UserRole[];
-}) {
+/**
+ * Gate for the unified application. Every verified, onboarded USER gets the
+ * same experience — this checks authentication, email verification and
+ * onboarding only. It never branches on users/{uid}.role.
+ */
+export function AuthGate({ children }: { children: React.ReactNode }) {
   const {
     loading,
     profile,
     user,
-    previewAs,
     needsEmailVerification,
     needsOnboarding,
     needsPasswordChange,
@@ -27,17 +24,7 @@ export function AuthGate({
   const pathname = usePathname();
 
   useEffect(() => {
-    if (AUTH_BYPASS) {
-      if (roles.includes("client") && profile?.role !== "client") {
-        previewAs("client");
-      } else if (
-        (roles.includes("admin") || roles.includes("staff")) &&
-        profile?.role === "client"
-      ) {
-        previewAs("admin");
-      }
-      return;
-    }
+    if (AUTH_BYPASS) return;
     if (loading) return;
     if (!user) {
       router.replace(`/login?next=${encodeURIComponent(pathname)}`);
@@ -53,19 +40,13 @@ export function AuthGate({
     }
     if (!profile) {
       router.replace("/verify-email");
-      return;
-    }
-    if (!roles.includes(profile.role)) {
-      router.replace(profile.role === "client" ? "/client" : "/dashboard");
     }
   }, [
     loading,
     user,
     profile,
-    roles,
     router,
     pathname,
-    previewAs,
     needsEmailVerification,
     needsOnboarding,
     needsPasswordChange,
@@ -81,8 +62,7 @@ export function AuthGate({
     needsPasswordChange ||
     needsEmailVerification ||
     needsOnboarding ||
-    !profile ||
-    !roles.includes(profile.role)
+    !profile
   ) {
     return <SiteSpinner />;
   }

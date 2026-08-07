@@ -6,28 +6,25 @@ import {
   SiteSpinner,
 } from "@/components/progress/primitives";
 import { useAuth } from "@/lib/auth-context";
-import { useWorkspace } from "@/lib/workspace-context";
-import { listProjects } from "@/lib/services/projects";
+import { fetchMyProjects } from "@/lib/services/projects";
 import type { Project } from "@/lib/types";
 import { formatBytes, getProjectDisplayName } from "@/lib/utils";
 
 export default function StoragePage() {
   const { profile } = useAuth();
-  const { workspaceId } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId;
-    if (!ws) {
+    if (!profile?.uid) {
       setLoading(false);
       return;
     }
-    listProjects({ workspaceId: ws }).then((data) => {
-      setProjects(data);
-      setLoading(false);
-    });
-  }, [workspaceId, profile]);
+    fetchMyProjects()
+      .then(setProjects)
+      .catch(() => setProjects([]))
+      .finally(() => setLoading(false));
+  }, [profile?.uid]);
 
   const totals = useMemo(() => {
     return projects.reduce(
@@ -40,14 +37,6 @@ export default function StoragePage() {
       { bytes: 0, photos: 0, videos: 0 },
     );
   }, [projects]);
-
-  if (profile?.role !== "admin") {
-    return (
-      <p style={{ color: "var(--site-text-secondary)" }}>
-        Only administrators can view storage usage.
-      </p>
-    );
-  }
 
   if (loading) return <SiteSpinner />;
 

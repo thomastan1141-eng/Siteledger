@@ -42,6 +42,14 @@ type StaffMirrorRow = {
   assignedProjectCount: number;
 };
 
+type OwnerlessProjectRow = {
+  path: string;
+  workspaceId: string;
+  projectId: string;
+  status: string;
+  address: string;
+};
+
 async function main() {
   const args = process.argv.slice(2);
   const wsIdx = args.indexOf("--workspace");
@@ -52,6 +60,28 @@ async function main() {
   const invitations: InvitationRow[] = [];
   const members: MemberRow[] = [];
   const staffMirrors: StaffMirrorRow[] = [];
+  const ownerlessProjects: OwnerlessProjectRow[] = [];
+
+  // Ownerless Projects (missing createdBy) can never be deleted through the
+  // trash API anymore (no company-admin/workspace-owner fallback) — they
+  // must be reported here and backfilled with a real createdBy out-of-band.
+  const ownerlessSnap = await db
+    .collectionGroup("projects")
+    .get();
+  for (const doc of ownerlessSnap.docs) {
+    if (!doc.ref.path.startsWith("companies/")) continue;
+    const data = doc.data() || {};
+    const workspaceId = String(data.workspaceId || data.companyId || "");
+    if (workspaceFilter && workspaceId !== workspaceFilter) continue;
+    if (data.createdBy) continue;
+    ownerlessProjects.push({
+      path: doc.ref.path,
+      workspaceId,
+      projectId: doc.id,
+      status: String(data.status || ""),
+      address: String(data.address || ""),
+    });
+  }
 
   const inviteSnap = await db.collectionGroup("invitations").get();
   for (const doc of inviteSnap.docs) {
@@ -158,16 +188,20 @@ async function main() {
       companyStaffUsers: staffMirrors.length,
       companyStaffWithZeroStaffIdsAssignments:
         legacyStaffWithNoAssignments.length,
+      ownerlessProjects: ownerlessProjects.length,
     },
     notes: [
       "PENDING invitations must NOT be auto-granted. Revoke or ask owners to Share again.",
       "ACCEPTED invitations are historical; live access should come from ACTIVE members + arrays.",
       "company staff with zero staffIds assignments currently lose project access under tightened Rules (expected).",
+      "Ownerless Projects (missing createdBy) can no longer be trashed/deleted via the API " +
+        "(no company-admin/workspace-owner fallback). Backfill createdBy manually before they can be managed.",
       "This script does not mutate data.",
     ],
     pendingInvitations: pendingOnly,
     inconsistentActiveMembers: inconsistentMembers,
     legacyStaffWithNoAssignments,
+    ownerlessProjects,
   };
 
   const outPath = `scripts/access-migration-report-${Date.now()}.json`;

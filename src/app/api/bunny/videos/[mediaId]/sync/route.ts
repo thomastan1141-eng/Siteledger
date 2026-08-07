@@ -3,7 +3,10 @@ import { getAdminDb } from "@/lib/firebase-admin";
 import { bunnyDetailsToPatch, updateMediaAdmin } from "@/lib/bunny/media-store";
 import { getBunnyVideo, mapBunnyApiStatus } from "@/lib/bunny/server";
 import { authErrorResponse, verifyAuthenticatedRequest } from "@/lib/server/auth";
-import { assertProjectPermission } from "@/lib/server/project-permissions";
+import {
+  assertProjectPermission,
+  isMediaClientVisible,
+} from "@/lib/server/project-permissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +47,15 @@ export async function POST(
     const data = snap.data() || {};
     if (data.provider !== "BUNNY_STREAM" || !data.bunnyVideoId) {
       return NextResponse.json({ error: "Media not found." }, { status: 404 });
+    }
+    if (
+      ctx.role === "client" &&
+      !isMediaClientVisible(data)
+    ) {
+      return NextResponse.json(
+        { error: "You do not have access to this video." },
+        { status: 403 },
+      );
     }
 
     const details = await getBunnyVideo(String(data.bunnyVideoId));

@@ -8,6 +8,7 @@ import {
   query,
   serverTimestamp,
   updateDoc,
+  where,
 } from "firebase/firestore";
 import {
   deleteObject,
@@ -26,7 +27,6 @@ import {
   storagePurchasePhotoPath,
 } from "../paths";
 import type {
-  AppUser,
   LightingSpecifications,
   PurchaseCategory,
   PurchaseCurrency,
@@ -37,10 +37,26 @@ import type {
 } from "../types";
 import { DEFAULT_RMB_TO_SGD_RATE } from "../types";
 
-function purchaseWorkspace(user?: AppUser | null, workspaceId?: string) {
-  return requireTenantId(
-    workspaceId || user?.defaultWorkspaceId || user?.companyId,
-  );
+/**
+ * Project-scoped Purchase actor. Never the raw legacy users/{uid}.role —
+ * callers (PurchasesPanel) derive these two booleans from the resolved
+ * Project access (creator / EDITOR-preset colleague / Client member) so
+ * this service never re-interprets a global role. Firestore Rules
+ * independently re-enforce every write regardless of what this layer does.
+ */
+export type PurchaseActor = {
+  uid: string;
+  /** Creator or colleague with editPurchases — may manage any Purchase. */
+  canManageAll: boolean;
+  /** Assigned Client member — may only READ OWNER-responsibility items. */
+  isClient: boolean;
+};
+
+/** Workspace is always the Project's own workspaceId — never a fallback to
+ *  the caller's defaultWorkspaceId/companyId profile fields, which would be
+ *  wrong for a Project shared cross-workspace. */
+function purchaseWorkspace(workspaceId?: string) {
+  return requireTenantId(workspaceId);
 }
 
 export type PurchaseInput = {
@@ -316,17 +332,33 @@ export function mapPurchase(
   };
 }
 
+/**
+ * Internal write-path guard only — driven entirely by the Project-scoped
+ * PurchaseActor (see above), never the legacy users/{uid}.role. Firestore
+ * Rules independently re-enforce every write regardless.
+ */
 export function canManagePurchase(
-  user: AppUser | null | undefined,
-  item: Pick<PurchaseItem, "purchaseResponsibility">,
+  actor: PurchaseActor | null | undefined,
+  _item?: Pick<PurchaseItem, "purchaseResponsibility">,
 ) {
-  if (!user) return false;
-  if (user.role === "admin" || user.role === "staff") return true;
-  return user.role === "client" && item.purchaseResponsibility === "OWNER";
+  return actor?.canManageAll === true;
 }
 
-export function canViewPurchase(user: AppUser | null | undefined) {
-  return Boolean(user);
+/** Clients never manage Purchase photos — creator/EDITOR only. */
+export function canManagePurchasePhotos(
+  actor: PurchaseActor | null | undefined,
+  _item?: Pick<PurchaseItem, "purchaseResponsibility">,
+) {
+  return actor?.canManageAll === true;
+}
+
+export function canViewPurchase(
+  actor: PurchaseActor | null | undefined,
+  item: Pick<PurchaseItem, "purchaseResponsibility">,
+) {
+  if (!actor) return false;
+  if (!actor.isClient) return true;
+  return item.purchaseResponsibility === "OWNER";
 }
 
 export function getProjectRmbRate(
@@ -340,10 +372,15 @@ export function getProjectRmbRate(
 
 export async function listPurchases(
   projectId: string,
-  options?: { category?: PurchaseCategory; rmbToSgdRate?: number; workspaceId?: string },
+  options?: {
+    category?: PurchaseCategory;
+    rmbToSgdRate?: number;
+    workspaceId?: string;
+    clientOnly?: boolean;
+  },
 ) {
   const rate = getProjectRmbRate(projectId, options?.rmbToSgdRate);
-  const ws = purchaseWorkspace(null, options?.workspaceId);
+  const ws = purchaseWorkspace(options?.workspaceId);
   let items: PurchaseItem[];
 
   if (AUTH_BYPASS) {
@@ -352,16 +389,29 @@ export async function listPurchases(
       .map((p) =>
         mapPurchase(p.id, p as unknown as Record<string, unknown>, rate),
       );
+    if (options?.clientOnly) {
+      items = items.filter((item) => item.purchaseResponsibility === "OWNER");
+    }
   } else {
+    const purchasesRef = collection(
+      getFirebaseDb(),
+      purchasesPath(projectId, ws),
+    );
     const snap = await getDocs(
-      query(
-        collection(getFirebaseDb(), purchasesPath(projectId, ws)),
-        orderBy("updatedAt", "desc"),
-      ),
+      options?.clientOnly
+        ? query(
+            purchasesRef,
+            where("purchaseResponsibility", "==", "OWNER"),
+            orderBy("updatedAt", "desc"),
+          )
+        : query(purchasesRef, orderBy("updatedAt", "desc")),
     );
     items = snap.docs.map((d) => mapPurchase(d.id, d.data(), rate));
   }
 
+  if (options?.clientOnly) {
+    items = items.filter((item) => item.purchaseResponsibility === "OWNER");
+  }
   if (options?.category) {
     items = items.filter((p) => p.category === options.category);
   }
@@ -371,15 +421,15 @@ export async function listPurchases(
 export async function createPurchase(
   projectId: string,
   input: PurchaseInput,
-  user: AppUser,
+  actor: PurchaseActor,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
   workspaceId?: string,
 ) {
-  if (user.role === "client" && input.purchaseResponsibility !== "OWNER") {
-    throw new Error("Owners can only create Owner purchase items.");
+  if (actor.isClient) {
+    throw new Error("Clients cannot create Purchase items.");
   }
 
-  const ws = purchaseWorkspace(user, workspaceId);
+  const ws = purchaseWorkspace(workspaceId);
   const totals = calcPurchaseTotals({
     currency: input.currency,
     quantity: input.quantity,
@@ -410,8 +460,7 @@ export async function createPurchase(
         : undefined,
     coverImageUrl: input.coverImageUrl || photos[0]?.url || "",
     photos,
-    purchaseResponsibility:
-      user.role === "client" ? "OWNER" : input.purchaseResponsibility,
+    purchaseResponsibility: input.purchaseResponsibility,
     currency: totals.currency,
     quantity: totals.quantity,
     unitPriceRMB: totals.unitPriceRMB,
@@ -420,8 +469,8 @@ export async function createPurchase(
     totalSGD: totals.totalSGD,
     purchaseStatus: input.purchaseStatus,
     action: input.action?.trim() || "",
-    createdBy: user.uid,
-    updatedBy: user.uid,
+    createdBy: actor.uid,
+    updatedBy: actor.uid,
     createdAt: now,
     updatedAt: now,
   };
@@ -444,20 +493,17 @@ export async function updatePurchase(
   projectId: string,
   purchaseId: string,
   patch: Partial<PurchaseInput>,
-  user: AppUser,
+  actor: PurchaseActor,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
   workspaceId?: string,
 ) {
-  const ws = purchaseWorkspace(user, workspaceId);
+  const ws = purchaseWorkspace(workspaceId);
   const existing = (await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) throw new Error("Purchase item not found");
-  if (!canManagePurchase(user, existing)) {
+  if (actor.isClient || !canManagePurchase(actor, existing)) {
     throw new Error("You do not have permission to edit this item.");
-  }
-  if (user.role === "client" && patch.purchaseResponsibility === "STUDIO") {
-    throw new Error("Owners cannot change Purchased by to Studio.");
   }
 
   const currency = patch.currency ?? existing.currency;
@@ -510,9 +556,7 @@ export async function updatePurchase(
       "",
     photos,
     purchaseResponsibility:
-      user.role === "client"
-        ? ("OWNER" as const)
-        : (patch.purchaseResponsibility ?? existing.purchaseResponsibility),
+      patch.purchaseResponsibility ?? existing.purchaseResponsibility,
     currency: totals.currency,
     quantity: totals.quantity,
     unitPriceRMB: totals.unitPriceRMB,
@@ -521,7 +565,7 @@ export async function updatePurchase(
     totalSGD: totals.totalSGD,
     purchaseStatus: patch.purchaseStatus ?? existing.purchaseStatus,
     action: (patch.action ?? existing.action ?? "").trim(),
-    updatedBy: user.uid,
+    updatedBy: actor.uid,
     updatedAt: nowIso(),
   };
 
@@ -543,13 +587,13 @@ export async function updatePurchase(
 export async function recalculatePurchaseTotals(
   projectId: string,
   rmbToSgdRate: number,
-  user: AppUser,
+  actor: PurchaseActor,
   workspaceId?: string,
 ) {
-  if (user.role !== "admin" && user.role !== "staff") {
+  if (!actor.canManageAll) {
     throw new Error("Only studio users can change the exchange rate.");
   }
-  const ws = purchaseWorkspace(user, workspaceId);
+  const ws = purchaseWorkspace(workspaceId);
   const items = await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws });
   for (const item of items) {
     // SGD items are entered directly in SGD and never convert off the RMB
@@ -562,7 +606,7 @@ export async function recalculatePurchaseTotals(
         quantity: item.quantity,
         unitPriceRMB: item.unitPriceRMB,
       },
-      user,
+      actor,
       rmbToSgdRate,
       ws,
     );
@@ -575,18 +619,18 @@ export async function recalculatePurchaseTotals(
 export async function deletePurchase(
   projectId: string,
   purchaseId: string,
-  user: AppUser,
+  actor: PurchaseActor,
   workspaceId?: string,
 ) {
-  const ws = purchaseWorkspace(user, workspaceId);
+  if (actor.isClient) {
+    throw new Error("Clients cannot delete purchase items.");
+  }
+  const ws = purchaseWorkspace(workspaceId);
   const existing = (await listPurchases(projectId, { workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) return;
-  if (user.role === "client") {
-    throw new Error("Owners cannot delete purchase items. Ask the studio.");
-  }
-  if (!canManagePurchase(user, existing)) {
+  if (!canManagePurchase(actor, existing)) {
     throw new Error("You do not have permission to delete this item.");
   }
 
@@ -610,19 +654,17 @@ export async function deletePurchase(
 export async function duplicatePurchase(
   projectId: string,
   purchaseId: string,
-  user: AppUser,
+  actor: PurchaseActor,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
   workspaceId?: string,
 ) {
-  const ws = purchaseWorkspace(user, workspaceId);
+  const ws = purchaseWorkspace(workspaceId);
   const existing = (await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) throw new Error("Purchase item not found");
-  if (user.role !== "admin" && user.role !== "staff") {
-    if (!canManagePurchase(user, existing)) {
-      throw new Error("Cannot duplicate this item.");
-    }
+  if (actor.isClient || !canManagePurchase(actor, existing)) {
+    throw new Error("Cannot duplicate this item.");
   }
   return createPurchase(
     projectId,
@@ -636,8 +678,7 @@ export async function duplicatePurchase(
         : undefined,
       coverImageUrl: existing.coverImageUrl,
       photos: existing.photos.map((p) => ({ ...p })),
-      purchaseResponsibility:
-        user.role === "client" ? "OWNER" : existing.purchaseResponsibility,
+      purchaseResponsibility: existing.purchaseResponsibility,
       currency: existing.currency,
       quantity: existing.quantity,
       unitPriceRMB: existing.unitPriceRMB,
@@ -645,7 +686,7 @@ export async function duplicatePurchase(
       purchaseStatus: "TO_CONFIRM",
       action: existing.action,
     },
-    user,
+    actor,
     rmbToSgdRate,
     ws,
   );
@@ -660,17 +701,17 @@ export async function uploadPurchasePhotos(
   projectId: string,
   purchaseId: string,
   files: File[],
-  user: AppUser,
+  actor: PurchaseActor,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
   onProgress?: (pct: number) => void,
   workspaceId?: string,
 ) {
-  const ws = purchaseWorkspace(user, workspaceId);
+  const ws = purchaseWorkspace(workspaceId);
   const existing = (await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) throw new Error("Purchase item not found");
-  if (!canManagePurchase(user, existing)) {
+  if (actor.isClient || !canManagePurchasePhotos(actor, existing)) {
     throw new Error("You do not have permission to upload photos.");
   }
 
@@ -703,6 +744,13 @@ export async function uploadPurchasePhotos(
     const storageRef = ref(getFirebaseStorage(), path);
     const task = uploadBytesResumable(storageRef, file, {
       contentType: file.type || "image/jpeg",
+      customMetadata: {
+        uploadedBy: actor.uid,
+        purchaseId,
+        projectId,
+        workspaceId: ws,
+        purchaseResponsibility: existing.purchaseResponsibility,
+      },
     });
     await new Promise<void>((resolve, reject) => {
       task.on(
@@ -733,7 +781,7 @@ export async function uploadPurchasePhotos(
     projectId,
     purchaseId,
     { photos, coverImageUrl: existing.coverImageUrl || photos[0]?.url || "" },
-    user,
+    actor,
     rmbToSgdRate,
     ws,
   );
@@ -743,16 +791,16 @@ export async function removePurchasePhoto(
   projectId: string,
   purchaseId: string,
   photoId: string,
-  user: AppUser,
+  actor: PurchaseActor,
   rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
   workspaceId?: string,
 ) {
-  const ws = purchaseWorkspace(user, workspaceId);
+  const ws = purchaseWorkspace(workspaceId);
   const existing = (await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws })).find(
     (p) => p.id === purchaseId,
   );
   if (!existing) throw new Error("Purchase item not found");
-  if (!canManagePurchase(user, existing)) {
+  if (actor.isClient || !canManagePurchasePhotos(actor, existing)) {
     throw new Error("You do not have permission to remove photos.");
   }
   const target = existing.photos.find((p) => p.id === photoId);
@@ -777,7 +825,7 @@ export async function removePurchasePhoto(
     projectId,
     purchaseId,
     { photos, coverImageUrl },
-    user,
+    actor,
     rmbToSgdRate,
     ws,
   );

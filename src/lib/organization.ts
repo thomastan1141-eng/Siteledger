@@ -17,7 +17,7 @@ export type OrganizationMemberRole =
   | "MANAGER"
   | "STAFF"
   | "VIEWER";
-export type AccountTypeLabel = "Personal" | "Company" | "Client";
+export type AccountTypeLabel = "Personal" | "Company";
 
 export function resolveOrganizationType(
   workspace?: Workspace | null,
@@ -29,16 +29,17 @@ export function resolveOrganizationType(
   return "PERSONAL";
 }
 
+/**
+ * Cosmetic label only — never used for authorization. Every USER is equal;
+ * this never branches on users/{uid}.role.
+ */
 export function resolveAccountTypeLabel(
   profile: AppUser | null,
   workspace?: Workspace | null,
-  membership?: WorkspaceMember | null,
+  _membership?: WorkspaceMember | null,
 ): AccountTypeLabel {
   if (!profile) return "Personal";
-  if (profile.role === "client") return "Client";
-  if (profile.role === "staff") return "Company";
   if (resolveOrganizationType(workspace) === "COMPANY") return "Company";
-  if (membership?.role === "OWNER" || profile.role === "admin") return "Personal";
   return "Personal";
 }
 

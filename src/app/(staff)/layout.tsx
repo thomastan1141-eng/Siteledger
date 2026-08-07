@@ -9,7 +9,7 @@ export default function StaffLayout({
   children: React.ReactNode;
 }) {
   return (
-    <AuthGate roles={["admin", "staff"]}>
+    <AuthGate>
       <ProgressStaffShell>{children}</ProgressStaffShell>
     </AuthGate>
   );

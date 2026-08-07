@@ -60,10 +60,11 @@ service cloud.firestore {
         );
     }
 
+    // Workspace/company-level docs only (workspaces, companies/*/meta,
+    // workCategories, auditEvents). NEVER use this for Project access —
+    // company admin / workspace owner grant no authority over Projects.
     function isTenantAdmin(companyId) {
-      return isCompanyAdmin(companyId)
-        || isWorkspaceOwner(companyId)
-        || isAccountTenantAdmin(companyId);
+      return isCompanyAdmin(companyId) || isWorkspaceOwner(companyId);
     }
 
     function isCompanyStaffSide(companyId) {
@@ -121,14 +122,19 @@ service cloud.firestore {
             in ['COLLEAGUE', 'STAFF', 'OWNER'];
     }
 
+    // Client is a project member type — not a global/company user role.
     function isAssignedClient(companyId, projectId) {
-      return isCompanyClient(companyId)
+      return signedIn()
         && request.auth.uid in projectClientUserIds(companyId, projectId)
-        && hasActiveProjectMember(companyId, projectId);
+        && hasActiveProjectMember(companyId, projectId)
+        && projectMember(companyId, projectId).get('memberType', 'CLIENT')
+            == 'CLIENT';
     }
 
+    // Only the Project creator manages/reads everything on their Project.
+    // Company admin and workspace owner grant no Project authority.
     function canManageProject(companyId, projectId) {
-      return isTenantAdmin(companyId) || isProjectCreatorOf(companyId, projectId);
+      return isProjectCreatorOf(companyId, projectId);
     }
 
     function colleagueAllows(companyId, projectId, perm) {
@@ -138,7 +144,9 @@ service cloud.firestore {
           && (
             projectMember(companyId, projectId).get('permissionPreset', '') == 'OWNER'
             || projectMember(companyId, projectId).get('memberType', '') == 'OWNER'
-            || projectMember(companyId, projectId).get('permissions', {})[perm] == true
+            || projectMember(companyId, projectId)
+                .get('permissions', {})
+                .get(perm, false) == true
             || (
               projectMember(companyId, projectId).get('permissionPreset', '') == 'VIEW_ONLY'
               && perm in [
@@ -181,6 +189,29 @@ service cloud.firestore {
     function canDeleteOwnMedia(companyId, projectId) {
       return colleagueAllows(companyId, projectId, 'deleteOwnMedia')
         && resource.data.get('uploadedBy', '') == request.auth.uid;
+    }
+
+    function requestIsClientVisible() {
+      return request.resource.data.get('clientVisible', false) == true
+        || request.resource.data.get('visibility', 'internal') in ['client_visible', 'handover'];
+    }
+
+    function resourceIsClientVisible() {
+      return resource.data.get('clientVisible', false) == true
+        || resource.data.get('visibility', 'internal') in ['client_visible', 'handover'];
+    }
+
+    // Turning Media/Journal client-visible requires the creator, or a
+    // colleague whose effectivePermissions grant publishMediaToClient AND
+    // the Project itself allows staff publish — never a bare
+    // uploadMedia/addJournal grant (UPDATE_PROGRESS has those but not
+    // publishMediaToClient, so it can never publish to the client).
+    function canPublishToClient(companyId, projectId) {
+      return canManageProject(companyId, projectId)
+        || (
+          colleagueAllows(companyId, projectId, 'publishMediaToClient')
+          && projectDoc(companyId, projectId).get('allowStaffPublish', false) == true
+        );
     }
 
     match /users/{userId} {
@@ -283,21 +314,21 @@ service cloud.firestore {
             && get(projectMemberPath(companyId, projectId)).data.get('status', '') == 'ACTIVE';
         }
 
-        // get: dual gate (array index + ACTIVE member). list: array index only —
-        // Firestore list rules cannot reliably call get() on member docs; Share/Unshare
-        // keep arrays atomic with member status. Subcollections/Storage still dual-gated.
+        // Access is creator OR ACTIVE membership only — never company admin
+        // or workspace owner. get: dual gate (array index + ACTIVE member).
+        // list: array index only — Firestore list rules cannot reliably call
+        // get() on member docs; Share/Unshare keep arrays atomic with member
+        // status. Subcollections/Storage still dual-gated.
         allow get: if (
             projectNotTrashed()
             && (
-              isTenantAdmin(companyId)
-              || isProjectCreator()
+              isProjectCreator()
               || (
                 request.auth.uid in resource.data.get('staffIds', [])
                 && resourceHasActiveMember()
               )
               || (
-                isCompanyClient(companyId)
-                && request.auth.uid in resource.data.get('clientUserIds', [])
+                request.auth.uid in resource.data.get('clientUserIds', [])
                 && resourceHasActiveMember()
               )
             )
@@ -308,27 +339,35 @@ service cloud.firestore {
         allow list: if (
             projectNotTrashed()
             && (
-              isTenantAdmin(companyId)
-              || isProjectCreator()
+              isProjectCreator()
               || request.auth.uid in resource.data.get('staffIds', [])
-              || (
-                isCompanyClient(companyId)
-                && request.auth.uid in resource.data.get('clientUserIds', [])
-              )
+              || request.auth.uid in resource.data.get('clientUserIds', [])
             )
           )
           || (isProjectCreator()
               && resource.data.status in ['trashed', 'purging']);
 
-        allow create: if isTenantAdmin(companyId)
+        // Every verified USER may create a Project in their own workspace.
+        // ACTIVE workspace membership only validates "this is your own
+        // namespace" — it grants no authority over other USERS' Projects.
+        allow create: if signedIn()
+          && request.auth.token.email_verified == true
+          && isWorkspaceMember(companyId)
           && request.resource.data.workspaceId == companyId
           && request.resource.data.companyId == companyId
           && request.resource.data.createdBy == request.auth.uid;
 
+        // EDITOR (and every non-creator) may only edit normal Project
+        // content. createdBy/workspaceId/companyId are always immutable.
+        // Lifecycle/status fields used for trash/purge/restore and the
+        // sharing arrays (staffIds/clientUserIds) can only move through the
+        // dedicated Admin-SDK routes (trash/restore/purge/share/unshare),
+        // never through this generic client-side update — so any direct
+        // write that would touch them, or leave status in trashed/purging,
+        // is rejected here regardless of who the caller is.
         allow update: if projectNotTrashed()
           && (
-            isTenantAdmin(companyId)
-            || isProjectCreator()
+            isProjectCreator()
             || colleagueAllows(companyId, projectId, 'editProjectDetails')
           )
           && request.resource.data.companyId == resource.data.companyId
@@ -343,34 +382,79 @@ service cloud.firestore {
             || request.resource.data.createdBy == resource.data.createdBy
           )
           && !request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['deletedAt', 'purgeAt', 'deletedBy', 'clientRequestId']);
+            .hasAny([
+              'deletedAt', 'purgeAt', 'deletedBy', 'clientRequestId',
+              'statusBeforeTrash'
+            ])
+          && !(request.resource.data.get('status', 'upcoming') in ['trashed', 'purging'])
+          // staffIds/clientUserIds move only through the Admin-SDK
+          // share/unshare routes, which write the array and the
+          // members/{uid} doc atomically. Blocked here for every caller,
+          // including the creator — a direct client-side write would desync
+          // the array from real membership and recreate the stale-index bug.
+          && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['staffIds', 'clientUserIds']);
 
         allow delete: if false;
 
         match /members/{memberId} {
-          allow read: if isTenantAdmin(companyId)
+          allow read: if isProjectCreatorOf(companyId, projectId)
             || (signedIn() && request.auth.uid == memberId);
           allow write: if false;
         }
 
         match /invitations/{invitationId} {
-          allow read: if isTenantAdmin(companyId);
+          allow read: if isProjectCreatorOf(companyId, projectId);
           allow write: if false;
         }
 
         match /schedule/{itemId} {
+          // Missing clientVisible defaults to true for legacy Schedule docs.
           allow read: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'viewSchedule')
-            || isAssignedClient(companyId, projectId);
-          allow write: if canManageProject(companyId, projectId)
+            || (
+              isAssignedClient(companyId, projectId)
+              && resource.data.get('clientVisible', true) != false
+            );
+          allow create: if (
+              canManageProject(companyId, projectId)
+              || colleagueAllows(companyId, projectId, 'updateSchedule')
+            )
+            && (
+              request.resource.data.get('clientVisible', false) != true
+              || canPublishToClient(companyId, projectId)
+            );
+          allow update: if (
+              canManageProject(companyId, projectId)
+              || colleagueAllows(companyId, projectId, 'updateSchedule')
+            )
+            && (
+              request.resource.data.get('clientVisible', false) != true
+              || resource.data.get('clientVisible', false) == true
+              || canPublishToClient(companyId, projectId)
+            );
+          allow delete: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'updateSchedule');
         }
 
         match /dailyPlans/{planId} {
+          // Same backward-compatible model as Schedule: missing clientVisible
+          // behaves as true for existing records.
           allow read: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'viewSchedule')
-            || isAssignedClient(companyId, projectId);
-          allow write: if canManageProject(companyId, projectId)
+            || (
+              isAssignedClient(companyId, projectId)
+              && resource.data.get('clientVisible', true) != false
+            );
+          allow create: if (
+              canManageProject(companyId, projectId)
+              || colleagueAllows(companyId, projectId, 'updateSchedule')
+            );
+          allow update: if (
+              canManageProject(companyId, projectId)
+              || colleagueAllows(companyId, projectId, 'updateSchedule')
+            );
+          allow delete: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'updateSchedule');
         }
 
@@ -381,11 +465,24 @@ service cloud.firestore {
               isAssignedClient(companyId, projectId)
               && resource.data.visibility == 'client_visible'
             );
-          allow create: if canManageProject(companyId, projectId)
-            || colleagueAllows(companyId, projectId, 'addJournal');
-          allow update: if canManageProject(companyId, projectId)
-            || colleagueAllows(companyId, projectId, 'editAllJournal')
-            || canEditOwnJournal(companyId, projectId);
+          allow create: if (
+              canManageProject(companyId, projectId)
+              || colleagueAllows(companyId, projectId, 'addJournal')
+            )
+            && (
+              request.resource.data.get('visibility', 'internal') != 'client_visible'
+              || canPublishToClient(companyId, projectId)
+            );
+          allow update: if (
+              canManageProject(companyId, projectId)
+              || colleagueAllows(companyId, projectId, 'editAllJournal')
+              || canEditOwnJournal(companyId, projectId)
+            )
+            && (
+              request.resource.data.get('visibility', 'internal') != 'client_visible'
+              || resource.data.get('visibility', 'internal') == 'client_visible'
+              || canPublishToClient(companyId, projectId)
+            );
           allow delete: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'deleteAllJournal')
             || canDeleteOwnJournal(companyId, projectId);
@@ -414,6 +511,7 @@ service cloud.firestore {
               canManageProject(companyId, projectId)
               || colleagueAllows(companyId, projectId, 'uploadMedia')
             )
+            && (!requestIsClientVisible() || canPublishToClient(companyId, projectId))
             && (
               !('provider' in request.resource.data)
               || request.resource.data.provider != 'BUNNY_STREAM'
@@ -426,6 +524,10 @@ service cloud.firestore {
               || canEditOwnMedia(companyId, projectId)
               || colleagueAllows(companyId, projectId, 'publishMediaToClient')
             )
+            && (
+              !(requestIsClientVisible() && !resourceIsClientVisible())
+              || canPublishToClient(companyId, projectId)
+            )
             && !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny([
                 'bunnyVideoId', 'bunnyLibraryId', 'provider',
@@ -435,31 +537,26 @@ service cloud.firestore {
                 'mediaLifecycle'
               ]);
 
-          allow delete: if isTenantAdmin(companyId)
+          allow delete: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'deleteAllMedia')
             || canDeleteOwnMedia(companyId, projectId);
         }
 
         match /purchases/{purchaseId} {
+          // Client may only READ OWNER-responsibility Purchases. Never
+          // STUDIO. Clients have no create/update/delete path at all.
           allow read: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'viewPurchases')
-            || isAssignedClient(companyId, projectId);
-
-          allow create: if canManageProject(companyId, projectId)
-            || colleagueAllows(companyId, projectId, 'editPurchases')
-            || (
-              isAssignedClient(companyId, projectId)
-              && request.resource.data.purchaseResponsibility == 'OWNER'
-              && request.resource.data.projectId == projectId
-            );
-
-          allow update: if canManageProject(companyId, projectId)
-            || colleagueAllows(companyId, projectId, 'editPurchases')
             || (
               isAssignedClient(companyId, projectId)
               && resource.data.purchaseResponsibility == 'OWNER'
-              && request.resource.data.purchaseResponsibility == 'OWNER'
             );
+
+          allow create: if canManageProject(companyId, projectId)
+            || colleagueAllows(companyId, projectId, 'editPurchases');
+
+          allow update: if canManageProject(companyId, projectId)
+            || colleagueAllows(companyId, projectId, 'editPurchases');
 
           allow delete: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'editPurchases');

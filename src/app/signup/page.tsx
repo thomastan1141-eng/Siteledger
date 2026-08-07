@@ -37,7 +37,7 @@ export default function SignupPage() {
       return;
     }
     if (user && profile?.onboardingComplete) {
-      router.replace(profile.role === "client" ? "/client" : "/dashboard");
+      router.replace("/dashboard");
     }
   }, [loading, user, profile, needsEmailVerification, router]);
 

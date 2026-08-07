@@ -191,7 +191,6 @@ export async function setClientAccess(
 export async function completeOnboardingClient(token: string, body?: {
   studioName?: string;
   displayName?: string;
-  migrateLegacy?: boolean;
 }) {
   const res = await fetch("/api/onboarding", {
     method: "POST",

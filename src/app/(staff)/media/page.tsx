@@ -10,56 +10,66 @@ import {
 import { BunnyVideoUploader } from "@/components/media/bunny-video-uploader";
 import { ProgressMediaGrid } from "@/components/progress/media-grid";
 import { useAuth } from "@/lib/auth-context";
-import { useWorkspace } from "@/lib/workspace-context";
-import { listProjectsAcrossWorkspaces, workspaceIdsForProfile } from "@/lib/services/projects";
+import { fetchMyProjects } from "@/lib/services/projects";
 import { listMedia } from "@/lib/services/media";
 import type { MediaItem, Project } from "@/lib/types";
 import { getProjectDisplayName } from "@/lib/utils";
 
 export default function MediaLibraryPage() {
   const { profile } = useAuth();
-  const { workspaceId } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
-  const ws = workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "";
+
+  const selectedProject = projects.find((p) => p.id === projectId) || null;
+  // Always the selected Project's own workspaceId — never the USER's
+  // defaultWorkspaceId, which is wrong for a Project shared cross-workspace.
+  const projectWorkspaceId =
+    selectedProject?.workspaceId || selectedProject?.companyId || "";
+  const isCreator = Boolean(
+    selectedProject && profile?.uid && selectedProject.createdBy === profile.uid,
+  );
+  const isClientMember = Boolean(
+    selectedProject &&
+      profile?.uid &&
+      !isCreator &&
+      selectedProject.clientUserIds?.includes(profile.uid),
+  );
 
   function reloadMedia() {
-    const selected = projects.find((p) => p.id === projectId);
-    const tenant =
-      selected?.workspaceId || selected?.companyId || ws;
-    if (!projectId || !tenant) return;
-    listMedia(projectId, { workspaceId: tenant }).then(setMedia);
+    if (!projectId || !projectWorkspaceId) return;
+    listMedia(projectId, { workspaceId: projectWorkspaceId }).then(setMedia);
   }
 
   useEffect(() => {
-    const ids = workspaceIdsForProfile({
-      defaultWorkspaceId: ws,
-      companyId: profile?.companyId,
-      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
-    });
-    if (!ids.length) {
+    if (!profile?.uid) {
       setLoading(false);
       return;
     }
-    listProjectsAcrossWorkspaces({
-      workspaceIds: ids,
-      ...(profile?.role === "staff" ? { staffId: profile.uid } : {}),
-    }).then((data) => {
-      setProjects(data);
-      if (data[0]) setProjectId(data[0].id);
-      setLoading(false);
-    });
-  }, [profile, ws]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchMyProjects();
+        if (cancelled) return;
+        setProjects(data);
+        if (data[0]) setProjectId(data[0].id);
+      } catch {
+        if (!cancelled) setProjects([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.uid]);
 
   useEffect(() => {
-    const selected = projects.find((p) => p.id === projectId);
-    const tenant = selected?.workspaceId || selected?.companyId || ws;
-    if (!projectId || !tenant) return;
-    listMedia(projectId, { workspaceId: tenant }).then(setMedia);
-  }, [projectId, ws, projects]);
+    if (!projectId || !projectWorkspaceId) return;
+    listMedia(projectId, { workspaceId: projectWorkspaceId }).then(setMedia);
+  }, [projectId, projectWorkspaceId]);
 
   const filtered = media.filter((item) => {
     if (filter === "all") return true;
@@ -113,11 +123,11 @@ export default function MediaLibraryPage() {
         </SiteSelect>
       </div>
 
-      {projectId && ws && profile?.role !== "client" ? (
+      {projectId && projectWorkspaceId && !isClientMember ? (
         <div style={{ marginBottom: 20 }}>
           <BunnyVideoUploader
             projectId={projectId}
-            workspaceId={ws}
+            workspaceId={projectWorkspaceId}
             onUploaded={() => reloadMedia()}
           />
         </div>
@@ -126,10 +136,16 @@ export default function MediaLibraryPage() {
       <ProgressMediaGrid
         items={filtered}
         allowDownload
-        workspaceId={ws}
-        canDelete={profile?.role === "admin"}
+        workspaceId={projectWorkspaceId}
+        canDelete={isCreator}
         onChanged={reloadMedia}
       />
+
+      {!projects.length ? (
+        <p style={{ color: "var(--site-text-secondary)" }}>
+          No projects yet. Create a project first.
+        </p>
+      ) : null}
     </div>
   );
 }

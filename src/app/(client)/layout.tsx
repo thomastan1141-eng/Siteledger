@@ -1,19 +1,24 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { AuthGate } from "@/components/auth-gate";
-import { ProgressClientShell } from "@/components/progress/client-shell";
-import { ClientProjectProvider } from "@/lib/client-project";
+import { SiteSpinner } from "@/components/progress/primitives";
 
-export default function ClientLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+/**
+ * Legacy /client routes. Every USER now shares one unified application —
+ * this redirects into it without checking users/{uid}.role.
+ */
+export default function ClientLayout() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/dashboard");
+  }, [router]);
+
   return (
-    <AuthGate roles={["client"]}>
-      <ProgressClientShell>
-        <ClientProjectProvider>{children}</ClientProjectProvider>
-      </ProgressClientShell>
+    <AuthGate>
+      <SiteSpinner label="Opening your workspace…" />
     </AuthGate>
   );
 }

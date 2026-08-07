@@ -20,7 +20,7 @@ export default function HomePage() {
       router.replace("/login");
       return;
     }
-    router.replace(profile.role === "client" ? "/client" : "/dashboard");
+    router.replace("/dashboard");
   }, [loading, profile, router]);
 
   return <SiteSpinner label="Opening site progress…" />;

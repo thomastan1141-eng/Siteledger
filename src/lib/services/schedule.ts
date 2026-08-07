@@ -7,6 +7,7 @@ import {
   orderBy,
   query,
   updateDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import { getFirebaseDb } from "../firebase";
@@ -61,6 +62,24 @@ export async function listSchedule(
       .filter((item) => item.projectId === projectId)
       .map((item) => normalizeStage(item))
       .sort((a, b) => a.sortOrder - b.sortOrder);
+    if (options?.clientOnly) {
+      items = items.filter((item) => item.clientVisible !== false);
+    }
+  } else if (options?.clientOnly) {
+    // Query excludes non-client-visible stages directly, matching the
+    // Firestore Rule for a Client member — a Client's read must never
+    // depend on client-side filtering, since Rules deny the whole list
+    // request if any candidate document wouldn't satisfy the rule.
+    const snap = await getDocs(
+      query(
+        collection(getFirebaseDb(), schedulePath(projectId, ws)),
+        where("clientVisible", "==", true),
+        orderBy("sortOrder", "asc"),
+      ),
+    );
+    items = snap.docs
+      .map((d) => mapStage(d.id, d.data()))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
   } else {
     const q = query(
       collection(getFirebaseDb(), schedulePath(projectId, ws)),
@@ -70,10 +89,6 @@ export async function listSchedule(
     items = snap.docs
       .map((d) => mapStage(d.id, d.data()))
       .sort((a, b) => a.sortOrder - b.sortOrder);
-  }
-
-  if (options?.clientOnly) {
-    items = items.filter((item) => item.clientVisible !== false);
   }
 
   return items;

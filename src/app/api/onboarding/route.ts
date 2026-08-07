@@ -9,8 +9,6 @@ export const runtime = "nodejs";
 type Body = {
   studioName?: string | null;
   displayName?: string | null;
-  /** When true, attach legacy companies/siteledger projects to this workspace if owner. */
-  migrateLegacy?: boolean;
 };
 
 /**
@@ -18,10 +16,12 @@ type Body = {
  * Creates users/{uid}, workspaces/{id}, membership, and company user mirror.
  *
  * Migration assumption (documented):
- * If migrateLegacy is requested and the caller is the existing bootstrap admin
- * for companies/siteledger/meta/setup, existing projects under
- * companies/siteledger/projects are stamped with workspaceId = "siteledger"
- * and remain in place (no duplication).
+ * Legacy migration is a server-only decision (isLegacyAdmin) — it is never
+ * driven by a client-supplied flag. A normal new USER must never receive
+ * legacy admin Project access. Only the existing bootstrap admin for
+ * companies/siteledger/meta/setup ever triggers the one-time stamp of
+ * workspaceId = "siteledger" onto legacy companies/siteledger/projects docs
+ * that are missing it (no duplication, no new access grants).
  */
 export async function POST(request: Request) {
   try {
@@ -168,7 +168,8 @@ export async function POST(request: Request) {
     await batch.commit();
 
     // Safe migration: stamp workspaceId onto legacy projects (no duplication).
-    if (isLegacyAdmin || body.migrateLegacy) {
+    // Server-decided only (isLegacyAdmin) — never driven by a client flag.
+    if (isLegacyAdmin) {
       const projectsSnap = await db
         .collection(`companies/${COMPANY_ID}/projects`)
         .get();

@@ -10,29 +10,38 @@ import { PurchasesPanel } from "@/components/progress/purchases-panel";
 import { SiteSpinner } from "@/components/progress/primitives";
 import { useAuth } from "@/lib/auth-context";
 import { usePageWidth } from "@/lib/page-width";
-import { useWorkspace } from "@/lib/workspace-context";
-import { getProject, workspaceIdsForProfile } from "@/lib/services/projects";
-import type { Project } from "@/lib/types";
+import { fetchProjectResolve } from "@/lib/services/projects";
+import type { ColleaguePermissions, Project } from "@/lib/types";
 
 export default function ProjectPurchasesPage() {
   usePageWidth("data");
   const { id } = useParams<{ id: string }>();
   const { profile } = useAuth();
-  const { workspaceId } = useWorkspace();
   const [project, setProject] = useState<Project | null>(null);
+  const [access, setAccess] = useState<{
+    isOwner: boolean;
+    effectivePermissions: ColleaguePermissions | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const tenant = workspaceIdsForProfile({
-      defaultWorkspaceId:
-        workspaceId || profile?.defaultWorkspaceId || profile?.companyId || "",
-      companyId: profile?.companyId,
-      sharedWorkspaceIds: profile?.sharedWorkspaceIds,
-    });
-    getProject(id, tenant)
-      .then(setProject)
+    if (!profile?.uid) return;
+    // Server-resolved: creator OR ACTIVE membership, using the Project's
+    // actual workspaceId — never the current USER's defaultWorkspaceId.
+    fetchProjectResolve(id)
+      .then((resolved) => {
+        setProject(resolved?.project ?? null);
+        setAccess(
+          resolved
+            ? {
+                isOwner: resolved.isOwner,
+                effectivePermissions: resolved.effectivePermissions,
+              }
+            : null,
+        );
+      })
       .finally(() => setLoading(false));
-  }, [id, workspaceId, profile]);
+  }, [id, profile?.uid]);
 
   if (loading) return <SiteSpinner />;
   if (!project) {
@@ -48,7 +57,11 @@ export default function ProjectPurchasesPage() {
         activeTab="purchases"
         actions={<ProjectChromeActions projectId={project.id} />}
       />
-      <PurchasesPanel project={project} onProjectUpdated={setProject} />
+      <PurchasesPanel
+        project={project}
+        onProjectUpdated={setProject}
+        access={access}
+      />
     </div>
   );
 }

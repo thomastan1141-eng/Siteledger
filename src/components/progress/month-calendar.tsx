@@ -53,7 +53,12 @@ export function MonthWorkCalendar({
     setLoading(true);
     try {
       setPlans(
-        await listDailyPlans(projectId, { year, month, workspaceId }),
+        await listDailyPlans(projectId, {
+          year,
+          month,
+          workspaceId,
+          clientOnly: clientVisibleOnly,
+        }),
       );
     } catch (err) {
       console.error("[MonthWorkCalendar]", err);
@@ -189,6 +194,7 @@ export function MonthWorkCalendar({
           workspaceId={workspaceId}
           date={selectedDate}
           editable={editable}
+          canSetClientVisibility={!clientVisibleOnly}
           onClose={() => setSelectedDate(null)}
           onSaved={async () => {
             await reload();
@@ -205,6 +211,7 @@ function DayPlanSheet({
   workspaceId,
   date,
   editable,
+  canSetClientVisibility,
   onClose,
   onSaved,
 }: {
@@ -212,6 +219,7 @@ function DayPlanSheet({
   workspaceId?: string;
   date: string;
   editable: boolean;
+  canSetClientVisibility: boolean;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
@@ -220,6 +228,7 @@ function DayPlanSheet({
   ]);
   const [reminder, setReminder] = useState("");
   const [note, setNote] = useState("");
+  const [clientVisible, setClientVisible] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -239,6 +248,7 @@ function DayPlanSheet({
       );
       setReminder(plan?.reminder || "");
       setNote(plan?.note || "");
+      setClientVisible(plan?.clientVisible !== false);
     });
   }, [projectId, date, workspaceId]);
 
@@ -254,6 +264,7 @@ function DayPlanSheet({
         items,
         reminder,
         note,
+        clientVisible,
         workspaceId,
       });
       await onSaved();
@@ -385,6 +396,16 @@ function DayPlanSheet({
               disabled={!editable}
             />
           </SiteField>
+          {editable && canSetClientVisibility ? (
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={clientVisible}
+                onChange={(event) => setClientVisible(event.target.checked)}
+              />
+              Share with client
+            </label>
+          ) : null}
           {error ? (
             <p style={{ color: "var(--site-danger)", fontSize: 13 }}>{error}</p>
           ) : null}

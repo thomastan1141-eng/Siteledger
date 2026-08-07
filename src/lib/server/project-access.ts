@@ -177,7 +177,6 @@ export async function shareProjectAccess(input: {
 
   const memberType = input.inviteType === "CLIENT" ? "CLIENT" : "COLLEAGUE";
   const memberRole = input.inviteType === "CLIENT" ? "CLIENT" : "COLLEAGUE";
-  const profileRole = input.inviteType === "CLIENT" ? "client" : "staff";
 
   const batch = db.batch();
 
@@ -228,24 +227,23 @@ export async function shareProjectAccess(input: {
   const existingCompanyRole = companyUserSnap.exists
     ? String(companyUserSnap.data()?.role || "")
     : "";
-  const companyRole =
-    existingCompanyRole === "admin" ? "admin" : profileRole;
+  // Keep company-admin if present. Do not stamp permanent global staff/client roles;
+  // Client/Colleague live on the project member document only.
+  const companyUserPatch: Record<string, unknown> = {
+    email: target.email,
+    displayName,
+    companyId: workspaceId,
+    projectIds: FieldValue.arrayUnion(projectId),
+    active: true,
+    onboardingComplete: true,
+    updatedAt: now,
+    ...(companyUserSnap.exists ? {} : { createdAt: now }),
+  };
+  if (existingCompanyRole === "admin") {
+    companyUserPatch.role = "admin";
+  }
 
-  batch.set(
-    companyUserRef,
-    sanitizeForFirestore({
-      email: target.email,
-      displayName,
-      role: companyRole,
-      companyId: workspaceId,
-      projectIds: FieldValue.arrayUnion(projectId),
-      active: true,
-      onboardingComplete: true,
-      updatedAt: now,
-      ...(companyUserSnap.exists ? {} : { createdAt: now }),
-    }),
-    { merge: true },
-  );
+  batch.set(companyUserRef, sanitizeForFirestore(companyUserPatch), { merge: true });
 
   // Never write emailVerified. Never overwrite defaultWorkspaceId/companyId/role
   // on an existing account — sharedWorkspaceIds drives cross-workspace discovery.
@@ -261,13 +259,11 @@ export async function shareProjectAccess(input: {
     updatedAt: now,
   };
   if (!accountSnap.exists) {
-    accountPatch.role = profileRole;
-    accountPatch.companyId = workspaceId;
-    accountPatch.defaultWorkspaceId = workspaceId;
+    // Do not assign global Client/Colleague roles. Shared access is project-scoped.
     accountPatch.onboardingComplete = true;
     accountPatch.createdAt = now;
-  } else if (String(accountSnap.data()?.role || "") !== "admin") {
-    // Keep their home workspace; only ensure onboarding is complete for shared use.
+  } else {
+    // Never overwrite defaultWorkspaceId / companyId / role on existing accounts.
     accountPatch.onboardingComplete = true;
   }
   batch.set(accountRef, sanitizeForFirestore(accountPatch), { merge: true });
