@@ -40,10 +40,10 @@ describe("canManagePurchase — PurchaseActor matrix", () => {
     expect(canManagePurchasePhotos(actor, STUDIO_ITEM)).toBe(false);
   });
 
-  it("a Client may only view OWNER-responsibility Purchases", () => {
+  it("a Client may view all Purchases (Cost is gated separately)", () => {
     const actor: PurchaseActor = { uid: "u2", canManageAll: false, isClient: true };
     expect(canViewPurchase(actor, OWNER_ITEM)).toBe(true);
-    expect(canViewPurchase(actor, STUDIO_ITEM)).toBe(false);
+    expect(canViewPurchase(actor, STUDIO_ITEM)).toBe(true);
   });
 
   it("a VIEW_ONLY/UPDATE_PROGRESS colleague (neither canManageAll nor isClient) can manage nothing", () => {

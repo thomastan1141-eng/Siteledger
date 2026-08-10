@@ -10,7 +10,6 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
-  where,
 } from "firebase/firestore";
 import {
   deleteObject,
@@ -558,11 +557,12 @@ export function canManagePurchasePhotos(
 
 export function canViewPurchase(
   actor: PurchaseActor | null | undefined,
-  item: Pick<PurchaseItem, "purchaseResponsibility">,
+  _item?: Pick<PurchaseItem, "purchaseResponsibility">,
 ) {
+  // Clients may view all purchase records; private cost is gated separately
+  // (Rules + includePrivateCost). Colleagues/creator likewise may view.
   if (!actor) return false;
-  if (!actor.isClient) return true;
-  return item.purchaseResponsibility === "OWNER";
+  return true;
 }
 
 export function getProjectRmbRate(
@@ -595,29 +595,17 @@ export async function listPurchases(
       .map((p) =>
         mapPurchase(p.id, p as unknown as Record<string, unknown>, rate),
       );
-    if (options?.clientOnly) {
-      items = items.filter((item) => item.purchaseResponsibility === "OWNER");
-    }
   } else {
     const purchasesRef = collection(
       getFirebaseDb(),
       purchasesPath(projectId, ws),
     );
-    const snap = await getDocs(
-      options?.clientOnly
-        ? // Filter only — chronological order applied in sortPurchasesOldestFirst
-          // (avoids requiring a new composite index before the next indexes deploy).
-          query(
-            purchasesRef,
-            where("purchaseResponsibility", "==", "OWNER"),
-          )
-        : query(purchasesRef, orderBy("createdAt", "asc")),
-    );
+    // Clients and colleagues use the same public purchase list. Private cost
+    // is never part of this query — only merged when includePrivateCost is set
+    // (creator/EDITOR). clientOnly is kept for call-site compatibility and
+    // does not filter purchaseResponsibility.
+    const snap = await getDocs(query(purchasesRef, orderBy("createdAt", "asc")));
     items = snap.docs.map((d) => mapPurchase(d.id, d.data(), rate));
-  }
-
-  if (options?.clientOnly) {
-    items = items.filter((item) => item.purchaseResponsibility === "OWNER");
   }
   if (options?.category) {
     items = items.filter((p) => p.category === options.category);

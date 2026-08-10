@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth-context";
 import { usePageWidth } from "@/lib/page-width";
 import { fetchProjectResolve } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
-import type { Project, ScheduleItem } from "@/lib/types";
+import type { ColleaguePermissions, Project, ScheduleItem } from "@/lib/types";
 import { getProjectDisplayName } from "@/lib/utils";
 
 /**
@@ -29,6 +29,15 @@ export default function SchedulePage() {
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [manageOpen, setManageOpen] = useState(false);
+  const [access, setAccess] = useState<{
+    isOwner: boolean;
+    memberType: string | null;
+    effectivePermissions: ColleaguePermissions | null;
+  }>({
+    isOwner: false,
+    memberType: null,
+    effectivePermissions: null,
+  });
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -37,14 +46,29 @@ export default function SchedulePage() {
     fetchProjectResolve(id)
       .then(async (resolved) => {
         const p = resolved?.project ?? null;
+        const memberType = resolved?.memberType ?? null;
+        const clientOnly = memberType === "CLIENT";
+        setAccess({
+          isOwner: Boolean(resolved?.isOwner),
+          memberType,
+          effectivePermissions: resolved?.effectivePermissions ?? null,
+        });
         setProject(p);
         if (!p || !resolved?.workspaceId) {
           setSchedule([]);
           return;
         }
-        setSchedule(
-          await listSchedule(id, { workspaceId: resolved.workspaceId }),
-        );
+        try {
+          setSchedule(
+            await listSchedule(id, {
+              workspaceId: resolved.workspaceId,
+              clientOnly,
+            }),
+          );
+        } catch (err) {
+          console.error("[schedule page]", err);
+          setSchedule([]);
+        }
       })
       .finally(() => setLoading(false));
   }, [id, profile?.uid]);
@@ -55,6 +79,9 @@ export default function SchedulePage() {
   }
 
   const summary = summarizeSchedule(schedule);
+  const canEditSchedule =
+    access.isOwner || access.effectivePermissions?.updateSchedule === true;
+  const isClientMember = access.memberType === "CLIENT";
 
   return (
     <div>
@@ -67,13 +94,15 @@ export default function SchedulePage() {
             <SiteButton href={`/projects/${project.id}`} variant="ghost">
               Back to overview
             </SiteButton>
-            <SiteButton
-              type="button"
-              variant="accent"
-              onClick={() => setManageOpen(true)}
-            >
-              Manage stages
-            </SiteButton>
+            {canEditSchedule ? (
+              <SiteButton
+                type="button"
+                variant="accent"
+                onClick={() => setManageOpen(true)}
+              >
+                Manage stages
+              </SiteButton>
+            ) : null}
           </div>
         }
       />
@@ -82,7 +111,7 @@ export default function SchedulePage() {
         <WeekTimeline
           project={project}
           stages={summary.ordered}
-          editable
+          editable={canEditSchedule}
           onChanged={setSchedule}
         />
       </SiteSection>
@@ -92,17 +121,20 @@ export default function SchedulePage() {
           projectId={project.id}
           workspaceId={project.workspaceId}
           stages={summary.ordered}
-          editable
+          editable={canEditSchedule}
+          clientVisibleOnly={isClientMember}
         />
       </SiteSection>
 
-      <ManageStagesDialog
-        projectId={project.id}
-        workspaceId={project.workspaceId}
-        open={manageOpen}
-        onClose={() => setManageOpen(false)}
-        onChanged={setSchedule}
-      />
+      {canEditSchedule ? (
+        <ManageStagesDialog
+          projectId={project.id}
+          workspaceId={project.workspaceId}
+          open={manageOpen}
+          onClose={() => setManageOpen(false)}
+          onChanged={setSchedule}
+        />
+      ) : null}
     </div>
   );
 }

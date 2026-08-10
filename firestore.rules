@@ -543,14 +543,12 @@ service cloud.firestore {
         }
 
         match /purchases/{purchaseId} {
-          // Client may only READ OWNER-responsibility Purchases. Never
-          // STUDIO. Clients have no create/update/delete path at all.
+          // ACTIVE Client may READ all purchase records (OWNER + STUDIO).
+          // Purchases themselves are not private from Client — only
+          // purchases/{id}/private/cost is. Clients have no write path.
           allow read: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'viewPurchases')
-            || (
-              isAssignedClient(companyId, projectId)
-              && resource.data.purchaseResponsibility == 'OWNER'
-            );
+            || isAssignedClient(companyId, projectId);
 
           allow create: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'editPurchases');

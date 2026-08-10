@@ -15,6 +15,7 @@ export default function DailyUpdatePage() {
   const { profile } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const [canPublishToClient, setCanPublishToClient] = useState(false);
+  const [canAddJournal, setCanAddJournal] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -24,6 +25,10 @@ export default function DailyUpdatePage() {
     fetchProjectResolve(id)
       .then((resolved) => {
         setProject(resolved?.project ?? null);
+        const allowed =
+          Boolean(resolved?.isOwner) ||
+          resolved?.effectivePermissions?.addJournal === true;
+        setCanAddJournal(allowed);
         // Same gate as the main Project page: creator, or a colleague whose
         // effectivePermissions grant publishMediaToClient AND the Project
         // allows staff publish. Never a bare allowStaffPublish check.
@@ -36,9 +41,12 @@ export default function DailyUpdatePage() {
                   resolved.effectivePermissions?.publishMediaToClient === true)),
           ),
         );
+        if (resolved?.project && !allowed) {
+          router.replace(`/projects/${id}?tab=journal`);
+        }
       })
       .finally(() => setLoading(false));
-  }, [id, profile?.uid]);
+  }, [id, profile?.uid, router]);
 
   if (loading) return <SiteSpinner />;
   if (!project) {
@@ -46,6 +54,7 @@ export default function DailyUpdatePage() {
       <p style={{ color: "var(--site-text-secondary)" }}>Project not found.</p>
     );
   }
+  if (!canAddJournal) return <SiteSpinner />;
 
   return (
     <div>

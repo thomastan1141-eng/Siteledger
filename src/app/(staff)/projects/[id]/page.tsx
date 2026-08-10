@@ -153,23 +153,18 @@ export default function ProjectDetailsPage() {
       const resolved = await fetchProjectResolve(id);
       const p = resolved?.project ?? null;
       const ws = resolved?.workspaceId;
+      const memberType = resolved?.memberType ?? null;
+      const clientOnly = memberType === "CLIENT";
       setAccess({
         isOwner: Boolean(resolved?.isOwner),
-        memberType: resolved?.memberType ?? null,
+        memberType,
         permissionPreset: resolved?.permissionPreset ?? null,
         effectivePermissions: resolved?.effectivePermissions ?? null,
       });
-      const [s, u, m] = ws
-        ? await Promise.all([
-            listSchedule(id, { workspaceId: ws }),
-            listUpdates(id, { workspaceId: ws }),
-            listMedia(id, { workspaceId: ws }),
-          ])
-        : [[], [], []];
+      // Resolve succeeded → keep the Project even if a subcollection list
+      // fails. CLIENT queries MUST use clientOnly so Rules never evaluate
+      // internal/non-clientVisible docs (which deny the whole list).
       setProject(p);
-      setSchedule(s);
-      setUpdates(u);
-      setMedia(m);
       if (p) {
         setEdit({
           clientName: p.clientName || "",
@@ -183,6 +178,27 @@ export default function ProjectDetailsPage() {
           allowStaffPublish: p.allowStaffPublish,
           allowClientDownload: p.allowClientDownload,
         });
+      }
+      if (!ws || !p) {
+        setSchedule([]);
+        setUpdates([]);
+        setMedia([]);
+        return;
+      }
+      try {
+        const [s, u, m] = await Promise.all([
+          listSchedule(id, { workspaceId: ws, clientOnly }),
+          listUpdates(id, { workspaceId: ws, clientOnly }),
+          listMedia(id, { workspaceId: ws, clientOnly }),
+        ]);
+        setSchedule(s);
+        setUpdates(u);
+        setMedia(m);
+      } catch (subErr) {
+        console.error("[project subcollection reload]", subErr);
+        setSchedule([]);
+        setUpdates([]);
+        setMedia([]);
       }
     } catch (err) {
       console.error("[project reload]", err);
@@ -249,10 +265,17 @@ export default function ProjectDetailsPage() {
   }
 
   const isClientMember = access.memberType === "CLIENT";
+  // Capability flags from resolved Project membership — never users.role.
+  const canEditSchedule =
+    access.isOwner || access.effectivePermissions?.updateSchedule === true;
+  const canAddJournal =
+    access.isOwner || access.effectivePermissions?.addJournal === true;
+  const canUploadMedia =
+    access.isOwner || access.effectivePermissions?.uploadMedia === true;
+  // canEditSettings already defined above from editProjectDetails.
 
-  // Client boundary: Settings holds internal-only content (internal notes,
-  // staff-publish switches, delete). Never reachable by a Client member,
-  // even via a stale ?tab=settings link.
+  // Client boundary: Settings holds internal-only content. Purchases are
+  // visible to Clients (read-only, no private Cost).
   useEffect(() => {
     if (isClientMember && tab === "settings") setTab("overview");
   }, [isClientMember, tab]);
@@ -273,13 +296,14 @@ export default function ProjectDetailsPage() {
     (!isClientMember &&
       project.allowStaffPublish &&
       access.effectivePermissions?.publishMediaToClient === true);
+  const clientHiddenTabs: ProjectTabKey[] = isClientMember ? ["settings"] : [];
 
   return (
     <div>
       <ProjectChrome
         project={project}
         activeTab={tab}
-        hiddenTabs={isClientMember ? ["settings"] : undefined}
+        hiddenTabs={clientHiddenTabs.length ? clientHiddenTabs : undefined}
         onTabChange={(next) => {
           if (next === "purchases") {
             router.push(`/projects/${project.id}/purchases`);
@@ -290,7 +314,10 @@ export default function ProjectDetailsPage() {
         actions={
           <ProjectChromeActions
             projectId={project.id}
-            onStages={() => setManageStagesOpen(true)}
+            showJournal={canAddJournal}
+            onStages={
+              canEditSchedule ? () => setManageStagesOpen(true) : undefined
+            }
             onDelete={
               canDeleteProject
                 ? () => {
@@ -354,7 +381,7 @@ export default function ProjectDetailsPage() {
           {/* 3D view */}
           <Overview3DPanel
             project={project}
-            editable
+            editable={canEditSettings}
             onUpdated={setProject}
           />
 
@@ -364,7 +391,9 @@ export default function ProjectDetailsPage() {
               <SiteInput
                 type="date"
                 value={project.startDate || ""}
+                disabled={!canEditSettings}
                 onChange={async (e) => {
+                  if (!canEditSettings) return;
                   const startDate = e.target.value;
                   setProject(
                     await updateProject(
@@ -380,7 +409,9 @@ export default function ProjectDetailsPage() {
               <SiteInput
                 type="date"
                 value={project.contractCompletionDate || ""}
+                disabled={!canEditSettings}
                 onChange={async (e) => {
+                  if (!canEditSettings) return;
                   const contractCompletionDate = e.target.value;
                   setProject(
                     await updateProject(
@@ -406,7 +437,7 @@ export default function ProjectDetailsPage() {
             <WeekTimeline
               project={project}
               stages={summary.ordered}
-              editable
+              editable={canEditSchedule}
               onChanged={setSchedule}
             />
             <div style={{ marginTop: 28 }}>
@@ -419,7 +450,8 @@ export default function ProjectDetailsPage() {
                 projectId={project.id}
                 workspaceId={project.workspaceId}
                 stages={summary.ordered}
-                editable
+                editable={canEditSchedule}
+                clientVisibleOnly={isClientMember}
               />
             </div>
           </SiteSection>
@@ -429,30 +461,36 @@ export default function ProjectDetailsPage() {
             title="Stage snapshot"
             description="Only stages chosen for this project."
             action={
-              <SiteButton
-                type="button"
-                variant="ghost"
-                onClick={() => setManageStagesOpen(true)}
-              >
-                Manage stages
-              </SiteButton>
+              canEditSchedule ? (
+                <SiteButton
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setManageStagesOpen(true)}
+                >
+                  Manage stages
+                </SiteButton>
+              ) : undefined
             }
           >
             {!schedule.length ? (
               <div className="site-empty">
                 <strong>No stages added yet</strong>
-                <p style={{ marginTop: 8 }}>
-                  Choose common stages or add custom ones for this project.
-                </p>
-                <div style={{ marginTop: 14 }}>
-                  <SiteButton
-                    type="button"
-                    variant="accent"
-                    onClick={() => setManageStagesOpen(true)}
-                  >
-                    Add project stages
-                  </SiteButton>
-                </div>
+                {canEditSchedule ? (
+                  <>
+                    <p style={{ marginTop: 8 }}>
+                      Choose common stages or add custom ones for this project.
+                    </p>
+                    <div style={{ marginTop: 14 }}>
+                      <SiteButton
+                        type="button"
+                        variant="accent"
+                        onClick={() => setManageStagesOpen(true)}
+                      >
+                        Add project stages
+                      </SiteButton>
+                    </div>
+                  </>
+                ) : null}
               </div>
             ) : (
               <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
@@ -518,14 +556,16 @@ export default function ProjectDetailsPage() {
 
       {tab === "journal" ? (
         <>
-          <JournalComposer
-            project={project}
-            compact
-            canPublishToClient={canManageMediaVisibility}
-            onPublished={async () => {
-              await reload();
-            }}
-          />
+          {canAddJournal ? (
+            <JournalComposer
+              project={project}
+              compact
+              canPublishToClient={canManageMediaVisibility}
+              onPublished={async () => {
+                await reload();
+              }}
+            />
+          ) : null}
           <ProgressTimeline
             groups={groupUpdatesByDate(updates)}
             mediaByUpdate={mediaByUpdate}
@@ -536,7 +576,7 @@ export default function ProjectDetailsPage() {
 
       {tab === "media" ? (
         <div style={{ display: "grid", gap: 16 }}>
-          {!isClientMember && project.workspaceId ? (
+          {canUploadMedia && project.workspaceId ? (
             <SimpleMediaUploader
               projectId={project.id}
               workspaceId={project.workspaceId}
@@ -596,13 +636,15 @@ export default function ProjectDetailsPage() {
         </div>
       ) : null}
 
-      <ManageStagesDialog
-        projectId={project.id}
-        workspaceId={project.workspaceId}
-        open={manageStagesOpen}
-        onClose={() => setManageStagesOpen(false)}
-        onChanged={setSchedule}
-      />
+      {canEditSchedule ? (
+        <ManageStagesDialog
+          projectId={project.id}
+          workspaceId={project.workspaceId}
+          open={manageStagesOpen}
+          onClose={() => setManageStagesOpen(false)}
+          onChanged={setSchedule}
+        />
+      ) : null}
 
       {tab === "settings" ? (
         <form onSubmit={saveSettings} style={{ maxWidth: 640 }}>

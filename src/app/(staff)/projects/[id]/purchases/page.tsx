@@ -20,6 +20,7 @@ export default function ProjectPurchasesPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [access, setAccess] = useState<{
     isOwner: boolean;
+    memberType: string | null;
     effectivePermissions: ColleaguePermissions | null;
   } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,6 +36,7 @@ export default function ProjectPurchasesPage() {
           resolved
             ? {
                 isOwner: resolved.isOwner,
+                memberType: resolved.memberType ?? null,
                 effectivePermissions: resolved.effectivePermissions,
               }
             : null,
@@ -50,17 +52,36 @@ export default function ProjectPurchasesPage() {
     );
   }
 
+  const isClientMember = access?.memberType === "CLIENT";
+  const canAddJournal =
+    access?.isOwner || access?.effectivePermissions?.addJournal === true;
+
   return (
     <div>
       <ProjectChrome
         project={project}
         activeTab="purchases"
-        actions={<ProjectChromeActions projectId={project.id} />}
+        hiddenTabs={isClientMember ? ["settings"] : undefined}
+        actions={
+          <ProjectChromeActions
+            projectId={project.id}
+            showJournal={Boolean(canAddJournal)}
+          />
+        }
       />
       <PurchasesPanel
         project={project}
         onProjectUpdated={setProject}
-        access={access}
+        // Clients see public purchase rows only — never private Cost.
+        clientMode={isClientMember}
+        access={
+          access
+            ? {
+                isOwner: access.isOwner,
+                effectivePermissions: access.effectivePermissions,
+              }
+            : null
+        }
       />
     </div>
   );

@@ -161,13 +161,11 @@ service firebase.storage {
       return firestore.get(/databases/(default)/documents/companies/$(companyId)/projects/$(projectId)/purchases/$(purchaseId)).data;
     }
 
-    // Client may only READ photos for OWNER-responsibility Purchases.
-    // No Client create/update/delete of Purchase photos.
+    // Client may READ photos for any Purchase on their Project.
+    // Cost stays Firestore-private; photos are not. No Client write/delete.
     function clientCanReadPurchasePhotos(companyId, projectId, purchaseId) {
       return isClientOnProject(companyId, projectId)
-        && purchaseExists(companyId, projectId, purchaseId)
-        && purchaseData(companyId, projectId, purchaseId)
-          .get('purchaseResponsibility', 'STUDIO') == 'OWNER';
+        && purchaseExists(companyId, projectId, purchaseId);
     }
 
     // Legacy Media objects uploaded before customMetadata.clientVisible:

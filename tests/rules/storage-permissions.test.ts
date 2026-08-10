@@ -273,7 +273,7 @@ describe("Storage Purchase photo permissions", () => {
   const purchasePhotoPath = (purchaseId: string, name: string) =>
     `companies/${WORKSPACE}/projects/${PROJECT}/purchases/${purchaseId}/photos/${name}`;
 
-  it("Client may read OWNER Purchase photos but never upload or delete", async () => {
+  it("Client may read all Purchase photos but never upload or delete", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const base = `companies/${WORKSPACE}/projects/${PROJECT}/purchases`;
       await setDoc(doc(ctx.firestore(), `${base}/owner`), {
@@ -300,7 +300,7 @@ describe("Storage Purchase photo permissions", () => {
     await assertSucceeds(
       getBytes(ref(storage, purchasePhotoPath("owner", "photo.jpg"))),
     );
-    await assertFails(
+    await assertSucceeds(
       getBytes(ref(storage, purchasePhotoPath("studio", "photo.jpg"))),
     );
     await assertFails(

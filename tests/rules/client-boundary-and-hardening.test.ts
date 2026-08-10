@@ -343,7 +343,7 @@ describe("publishMediaToClient gate — never a bare uploadMedia/addJournal gran
   });
 });
 
-describe("Purchases — Client OWNER-read only", () => {
+describe("Purchases — Client read-all, write-none, no private cost", () => {
   it("Client cannot create either OWNER or STUDIO Purchases", async () => {
     const db = testEnv.authenticatedContext(CLIENT_UID).firestore();
     await assertFails(
@@ -360,7 +360,7 @@ describe("Purchases — Client OWNER-read only", () => {
     );
   });
 
-  it("Client reads only OWNER Purchases and cannot update or delete them", async () => {
+  it("Client reads OWNER and STUDIO Purchases but cannot update or delete", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const base = `companies/${COMPANY_ID}/projects/${PROJECT_NO_PUBLISH}/purchases`;
       await setDoc(doc(ctx.firestore(), `${base}/owner`), {
@@ -377,7 +377,7 @@ describe("Purchases — Client OWNER-read only", () => {
     const db = testEnv.authenticatedContext(CLIENT_UID).firestore();
     const base = `companies/${COMPANY_ID}/projects/${PROJECT_NO_PUBLISH}/purchases`;
     await assertSucceeds(getDoc(doc(db, `${base}/owner`)));
-    await assertFails(getDoc(doc(db, `${base}/studio`)));
+    await assertSucceeds(getDoc(doc(db, `${base}/studio`)));
     await assertFails(
       updateDoc(doc(db, `${base}/owner`), {
         photos: [{ id: "photo-1" }],

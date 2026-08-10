@@ -114,26 +114,27 @@ export function ProjectChromeActions({
   projectId,
   onStages,
   onDelete,
+  showJournal = true,
 }: {
   projectId: string;
   onStages?: () => void;
   /** When provided, shows a "Delete project" action regardless of active tab. */
   onDelete?: () => void;
+  /** Hide Today's journal for Client / VIEWER (read-only members). */
+  showJournal?: boolean;
 }) {
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-      <SiteButton href={`/projects/${projectId}/update`} variant="accent">
-        Today’s journal
-      </SiteButton>
+      {showJournal ? (
+        <SiteButton href={`/projects/${projectId}/update`} variant="accent">
+          Today’s journal
+        </SiteButton>
+      ) : null}
       {onStages ? (
         <SiteButton type="button" variant="ghost" onClick={onStages}>
           Stages
         </SiteButton>
-      ) : (
-        <SiteButton href={`/projects/${projectId}`} variant="ghost">
-          Stages
-        </SiteButton>
-      )}
+      ) : null}
       {onDelete ? (
         <SiteButton
           type="button"
