@@ -2185,123 +2185,159 @@ a.site-chip {
 }
 
 .site-purchase-table-simple .col-photo {
-  width: 5%;
-  min-width: 64px;
+  width: 4%;
+  min-width: 52px;
 }
 
 .site-purchase-table-simple.is-lighting .col-item {
-  width: 10%;
-  min-width: 84px;
+  width: 9%;
+  min-width: 76px;
 }
 
 .site-purchase-table-simple.is-simple .col-item {
-  width: 11%;
-  min-width: 84px;
+  width: 10%;
+  min-width: 76px;
 }
 
 .site-purchase-table-simple.is-lighting .col-desc {
-  width: 8%;
-  min-width: 72px;
+  width: 7%;
+  min-width: 64px;
 }
 
 .site-purchase-table-simple.is-simple .col-desc {
-  width: 9%;
-  min-width: 72px;
+  width: 8%;
+  min-width: 64px;
 }
 
 .site-purchase-table-simple.is-lighting .col-location {
-  width: 9%;
-  min-width: 84px;
+  width: 7%;
+  min-width: 72px;
 }
 
 .site-purchase-table-simple.is-simple .col-location {
-  width: 10%;
-  min-width: 84px;
+  width: 8%;
+  min-width: 72px;
 }
 
 .site-purchase-table-simple .col-specs {
-  width: 9%;
-  min-width: 84px;
+  width: 8%;
+  min-width: 76px;
 }
 
 .site-purchase-table-simple.is-lighting .col-by {
-  width: 8%;
-  min-width: 68px;
-}
-
-.site-purchase-table-simple.is-simple .col-by {
-  width: 9%;
-  min-width: 68px;
-}
-
-.site-purchase-table-simple.is-lighting .col-qty {
-  width: 6%;
-  min-width: 60px;
-}
-
-.site-purchase-table-simple.is-simple .col-qty {
   width: 7%;
   min-width: 60px;
 }
 
-.site-purchase-table-simple.is-lighting .col-unit {
+.site-purchase-table-simple.is-simple .col-by {
   width: 8%;
-  min-width: 68px;
+  min-width: 60px;
+}
+
+.site-purchase-table-simple.is-lighting .col-qty {
+  width: 5%;
+  min-width: 52px;
+}
+
+.site-purchase-table-simple.is-simple .col-qty {
+  width: 6%;
+  min-width: 52px;
+}
+
+.site-purchase-table-simple.is-lighting .col-unit {
+  width: 7%;
+  min-width: 60px;
 }
 
 .site-purchase-table-simple.is-simple .col-unit {
-  width: 9%;
-  min-width: 68px;
+  width: 8%;
+  min-width: 60px;
 }
 
 .site-purchase-table-simple.is-lighting .col-rmb,
 .site-purchase-table-simple.is-lighting .col-sgd {
-  width: 7%;
-  min-width: 60px;
+  width: 6%;
+  min-width: 56px;
 }
 
 .site-purchase-table-simple.is-simple .col-rmb,
 .site-purchase-table-simple.is-simple .col-sgd {
-  width: 8%;
-  min-width: 60px;
+  width: 7%;
+  min-width: 56px;
 }
 
 .site-purchase-table-simple.is-with-cost .col-cost,
-.site-purchase-table-simple.is-with-cost .col-total-cost {
+.site-purchase-table-simple.is-with-cost .col-total-cost,
+.site-purchase-table-simple.is-with-cost .col-total-cost-sgd {
+  width: 6%;
+  min-width: 56px;
+}
+
+.site-purchase-table-simple.is-with-cost.is-lighting .col-photo {
+  width: 3.5%;
+  min-width: 48px;
+}
+
+.site-purchase-table-simple.is-with-cost.is-lighting .col-desc,
+.site-purchase-table-simple.is-with-cost.is-simple .col-desc {
+  width: 6%;
+  min-width: 56px;
+}
+
+.site-purchase-table-simple.is-with-cost.is-lighting .col-location,
+.site-purchase-table-simple.is-with-cost.is-simple .col-location {
+  width: 6%;
+  min-width: 64px;
+}
+
+.site-purchase-table-simple.is-with-cost.is-lighting .col-by,
+.site-purchase-table-simple.is-with-cost.is-simple .col-by {
   width: 6%;
   min-width: 56px;
 }
 
 .site-purchase-table-simple.is-with-cost.is-lighting .col-rmb,
-.site-purchase-table-simple.is-with-cost.is-lighting .col-sgd {
-  width: 6%;
-  min-width: 56px;
-}
-
+.site-purchase-table-simple.is-with-cost.is-lighting .col-sgd,
 .site-purchase-table-simple.is-with-cost.is-simple .col-rmb,
 .site-purchase-table-simple.is-with-cost.is-simple .col-sgd {
-  width: 6%;
-  min-width: 56px;
+  width: 5.5%;
+  min-width: 52px;
 }
 
 .site-purchase-table-simple.is-lighting .col-status {
-  width: 9%;
-  min-width: 84px;
+  width: 8%;
+  min-width: 76px;
 }
 
 .site-purchase-table-simple.is-simple .col-status {
-  width: 10%;
-  min-width: 84px;
+  width: 9%;
+  min-width: 76px;
+}
+
+.site-purchase-table-simple.is-with-cost.is-lighting .col-status,
+.site-purchase-table-simple.is-with-cost.is-simple .col-status {
+  width: 7%;
+  min-width: 72px;
 }
 
 .site-purchase-table-simple .col-action {
   width: 3%;
-  min-width: 84px;
+  min-width: 72px;
+}
+
+.site-purchase-table-simple.is-with-cost .col-action {
+  width: 2.5%;
+  min-width: 64px;
 }
 
 .site-purchase-table-simple .col-more {
-  width: 3%;
-  min-width: 36px;
+  width: 2.5%;
+  min-width: 32px;
+}
+
+.site-purchase-table-simple.is-with-cost .col-more {
+  width: 2%;
+  min-width: 28px;
 }
 
 .site-purchase-table-simple th:nth-child(2),
@@ -2459,7 +2495,8 @@ a.site-chip {
 }
 
 .site-purchase-location-cell {
-  vertical-align: top;
+  min-width: 0;
+  vertical-align: middle;
 }
 
 .site-purchase-location-summary {

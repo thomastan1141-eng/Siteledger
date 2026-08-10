@@ -559,12 +559,12 @@ export interface PurchaseItem {
   createdAt: string;
   updatedAt: string;
   /**
-   * Private unit cost — loaded only for Project creator / EDITOR.
+   * Private unit cost in RMB — loaded only for Project creator / EDITOR.
    * Never stored on the public purchase document (subcollection private/cost).
    * Undefined means not loaded or not set; display as "—".
    */
   unitCost?: number;
-  /** Private totalCost = quantity × unitCost (same currency as the item). */
+  /** Private totalCost RMB = quantity × unitCost. SGD is derived via rate. */
   totalCost?: number;
 }
 

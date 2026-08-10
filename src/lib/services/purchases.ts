@@ -78,22 +78,47 @@ export type PurchaseInput = {
   purchaseStatus: PurchaseStatus;
   action?: string;
   /**
-   * Private unit cost in the item's currency.
+   * Private unit cost in RMB.
    * `null` clears an existing private cost; omit to leave unchanged on update.
    */
   unitCost?: number | null;
 };
 
 export type PurchasePrivateCost = {
+  /** Unit cost in RMB. */
   unitCost: number;
+  /** totalCost RMB = quantity × unitCost (stored for convenience). */
   totalCost: number;
   updatedAt: string;
   updatedBy: string;
 };
 
-/** totalCost = quantity × unitCost (same currency as the purchase item). */
+/** totalCost RMB = quantity × unitCost (RMB). */
 export function calcPurchaseTotalCost(quantity: number, unitCost: number) {
   return roundMoney(Math.max(0, quantity) * Math.max(0, unitCost));
+}
+
+/** Derive Total Cost SGD from RMB total and the current RMB→SGD rate. */
+export function calcPurchaseTotalCostSgd(
+  totalCostRmb: number,
+  rmbToSgdRate: number,
+) {
+  return roundMoney(
+    Math.max(0, totalCostRmb) * Math.max(0, rmbToSgdRate),
+  );
+}
+
+/** Resolve live RMB/SGD private cost totals for one item (null if cost unset). */
+export function resolvePurchaseCostTotals(
+  item: Pick<PurchaseItem, "quantity" | "unitCost">,
+  rmbToSgdRate: number,
+): { totalCostRmb: number; totalCostSgd: number } | null {
+  if (item.unitCost == null || !Number.isFinite(item.unitCost)) return null;
+  const totalCostRmb = calcPurchaseTotalCost(item.quantity, item.unitCost);
+  return {
+    totalCostRmb,
+    totalCostSgd: calcPurchaseTotalCostSgd(totalCostRmb, rmbToSgdRate),
+  };
 }
 
 /** Private cost is visible/editable only to creator/EDITOR (canManageAll). */
@@ -1097,14 +1122,18 @@ export async function removePurchasePhoto(
   );
 }
 
-export function summarizeCategory(items: PurchaseItem[]) {
+export function summarizeCategory(
+  items: PurchaseItem[],
+  rmbToSgdRate = DEFAULT_RMB_TO_SGD_RATE,
+) {
   const active = items.filter((i) => i.purchaseStatus !== "CANCELLED");
   let totalCostRMB = 0;
   let totalCostSGD = 0;
   for (const item of active) {
-    if (item.totalCost == null || !Number.isFinite(item.totalCost)) continue;
-    if (item.currency === "SGD") totalCostSGD += item.totalCost;
-    else totalCostRMB += item.totalCost;
+    const costs = resolvePurchaseCostTotals(item, rmbToSgdRate);
+    if (!costs) continue;
+    totalCostRMB += costs.totalCostRmb;
+    totalCostSGD += costs.totalCostSgd;
   }
   return {
     count: items.length,
@@ -1117,9 +1146,10 @@ export function summarizeCategory(items: PurchaseItem[]) {
 
 export function exportPurchasesCsv(
   items: PurchaseItem[],
-  options?: { includePrivateCost?: boolean },
+  options?: { includePrivateCost?: boolean; rmbToSgdRate?: number },
 ) {
   const includeCost = options?.includePrivateCost === true;
+  const rate = options?.rmbToSgdRate ?? DEFAULT_RMB_TO_SGD_RATE;
   const headers = [
     "Category",
     "Item",
@@ -1135,36 +1165,46 @@ export function exportPurchasesCsv(
     "Unit Price",
     "Total RMB",
     "Total SGD",
-    ...(includeCost ? ["Cost", "Total Cost"] : []),
+    ...(includeCost
+      ? ["Cost RMB", "Total Cost RMB", "Total Cost SGD"]
+      : []),
     "Status",
     "Action",
     "Cover photo URL",
   ];
-  const rows = items.map((item) => [
-    item.category,
-    item.itemName,
-    item.description,
-    item.locations.join(" / "),
-    item.lightingSpecifications?.watt || "",
-    item.lightingSpecifications?.fittingColour || "",
-    item.lightingSpecifications?.colourTemperature || "",
-    item.lightingSpecifications?.cutOutSize || "",
-    item.purchaseResponsibility,
-    String(item.quantity),
-    item.currency,
-    String(item.currency === "SGD" ? item.unitPriceSGD : item.unitPriceRMB),
-    item.currency === "SGD" ? "" : String(item.totalRMB),
-    String(item.totalSGD),
-    ...(includeCost
-      ? [
-          item.unitCost != null ? String(item.unitCost) : "",
-          item.totalCost != null ? String(item.totalCost) : "",
-        ]
-      : []),
-    item.purchaseStatus,
-    item.action || "",
-    item.coverImageUrl || "",
-  ]);
+  const rows = items.map((item) => {
+    const costs = includeCost
+      ? resolvePurchaseCostTotals(item, rate)
+      : null;
+    return [
+      item.category,
+      item.itemName,
+      item.description,
+      item.locations.join(" / "),
+      item.lightingSpecifications?.watt || "",
+      item.lightingSpecifications?.fittingColour || "",
+      item.lightingSpecifications?.colourTemperature || "",
+      item.lightingSpecifications?.cutOutSize || "",
+      item.purchaseResponsibility,
+      String(item.quantity),
+      item.currency,
+      String(item.currency === "SGD" ? item.unitPriceSGD : item.unitPriceRMB),
+      item.currency === "SGD" ? "" : String(item.totalRMB),
+      String(item.totalSGD),
+      ...(includeCost
+        ? costs
+          ? [
+              String(item.unitCost),
+              String(costs.totalCostRmb),
+              String(costs.totalCostSgd),
+            ]
+          : ["", "", ""]
+        : []),
+      item.purchaseStatus,
+      item.action || "",
+      item.coverImageUrl || "",
+    ];
+  });
   const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
   return [headers, ...rows]
     .map((row) => row.map((cell) => escape(String(cell))).join(","))

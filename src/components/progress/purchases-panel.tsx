@@ -42,7 +42,6 @@ import {
   parseMoney,
 } from "@/lib/money";
 import {
-  calcPurchaseTotalCost,
   canViewPrivatePurchaseCost,
   createPurchase,
   deletePurchase,
@@ -51,6 +50,7 @@ import {
   listPurchases,
   recalculatePurchaseTotals,
   removePurchasePhoto,
+  resolvePurchaseCostTotals,
   summarizeCategory,
   updatePurchase,
   uploadPurchasePhotos,
@@ -231,7 +231,10 @@ export function PurchasesPanel({
     });
   }, [items, search]);
 
-  const summary = useMemo(() => summarizeCategory(filtered), [filtered]);
+  const summary = useMemo(
+    () => summarizeCategory(filtered, rate),
+    [filtered, rate],
+  );
   const showPrivateCost = canViewPrivatePurchaseCost(purchaseActor);
 
   function flash(state: SaveState) {
@@ -290,6 +293,7 @@ export function PurchasesPanel({
   function downloadCsv() {
     const csv = exportPurchasesCsv(filtered, {
       includePrivateCost: showPrivateCost,
+      rmbToSgdRate: rate,
     });
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -444,6 +448,7 @@ export function PurchasesPanel({
                       <>
                         <col className="col-cost" />
                         <col className="col-total-cost" />
+                        <col className="col-total-cost-sgd" />
                       </>
                     ) : null}
                     <col className="col-status" />
@@ -467,7 +472,8 @@ export function PurchasesPanel({
                       {showPrivateCost ? (
                         <>
                           <th>Cost</th>
-                          <th>Total Cost</th>
+                          <th>Total Cost RMB</th>
+                          <th>Total Cost SGD</th>
                         </>
                       ) : null}
                       <th>Status</th>
@@ -558,19 +564,21 @@ export function PurchasesPanel({
                   </p>
                   {showPrivateCost ? (
                     <p>
-                      Cost{" "}
-                      {item.unitCost == null
-                        ? "—"
-                        : item.currency === "SGD"
-                          ? formatSgd(item.unitCost)
-                          : formatRmb(item.unitCost)}
-                      {" · "}
-                      Total Cost{" "}
-                      {item.totalCost == null
-                        ? "—"
-                        : item.currency === "SGD"
-                          ? formatSgd(item.totalCost)
-                          : formatRmb(item.totalCost)}
+                      {(() => {
+                        const costs = resolvePurchaseCostTotals(item, rate);
+                        return (
+                          <>
+                            Cost{" "}
+                            {costs ? formatRmb(item.unitCost as number) : "—"}
+                            {" · "}
+                            Total Cost RMB{" "}
+                            {costs ? formatRmb(costs.totalCostRmb) : "—"}
+                            {" · "}
+                            Total Cost SGD{" "}
+                            {costs ? formatSgd(costs.totalCostSgd) : "—"}
+                          </>
+                        );
+                      })()}
                     </p>
                   ) : null}
                   <span
@@ -1091,11 +1099,10 @@ function PurchaseRow({
     rmbToSgdRate: rate,
   });
   const lightingText = formatLightingSpecs(item.lightingSpecifications);
-  const hasCost =
-    item.unitCost != null && Number.isFinite(item.unitCost);
-  const liveTotalCost = hasCost
-    ? calcPurchaseTotalCost(item.quantity, item.unitCost as number)
+  const costTotals = showPrivateCost
+    ? resolvePurchaseCostTotals(item, rate)
     : null;
+  const hasCost = costTotals != null;
 
   return (
     <tr>
@@ -1219,21 +1226,16 @@ function PurchaseRow({
                 }}
               />
             ) : hasCost ? (
-              isSgd ? (
-                formatSgd(item.unitCost as number)
-              ) : (
-                formatRmb(item.unitCost as number)
-              )
+              formatRmb(item.unitCost as number)
             ) : (
               "—"
             )}
           </td>
           <td>
-            {liveTotalCost == null
-              ? "—"
-              : isSgd
-                ? formatSgd(liveTotalCost)
-                : formatRmb(liveTotalCost)}
+            {costTotals ? formatRmb(costTotals.totalCostRmb) : "—"}
+          </td>
+          <td>
+            {costTotals ? formatSgd(costTotals.totalCostSgd) : "—"}
           </td>
         </>
       ) : null}
@@ -1726,9 +1728,12 @@ function PurchaseFormSheet({
   });
   const isLighting = category === "LIGHTING";
   const isSgd = form.currency === "SGD";
-  const formTotalCost =
+  const formCostTotals =
     form.unitCost != null && Number.isFinite(form.unitCost)
-      ? calcPurchaseTotalCost(form.quantity, form.unitCost)
+      ? resolvePurchaseCostTotals(
+          { quantity: form.quantity, unitCost: form.unitCost },
+          rate,
+        )
       : null;
 
   useEffect(() => {
@@ -2030,7 +2035,7 @@ function PurchaseFormSheet({
               </SiteField>
             )}
             {showPrivateCost ? (
-              <SiteField label="Cost">
+              <SiteField label="Cost (RMB)">
                 <SiteInput
                   type="number"
                   min={0}
@@ -2043,7 +2048,7 @@ function PurchaseFormSheet({
                       unitCost: raw === "" ? null : parseMoney(raw),
                     }));
                   }}
-                  placeholder="Unit cost"
+                  placeholder="Unit cost RMB"
                 />
               </SiteField>
             ) : null}
@@ -2071,13 +2076,18 @@ function PurchaseFormSheet({
             {showPrivateCost ? (
               <>
                 {" · "}
-                Total Cost:{" "}
+                Total Cost RMB:{" "}
                 <strong>
-                  {formTotalCost == null
-                    ? "—"
-                    : isSgd
-                      ? formatSgd(formTotalCost)
-                      : formatRmb(formTotalCost)}
+                  {formCostTotals
+                    ? formatRmb(formCostTotals.totalCostRmb)
+                    : "—"}
+                </strong>
+                {" · "}
+                Total Cost SGD:{" "}
+                <strong>
+                  {formCostTotals
+                    ? formatSgd(formCostTotals.totalCostSgd)
+                    : "—"}
                 </strong>
               </>
             ) : null}
