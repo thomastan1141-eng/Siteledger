@@ -560,6 +560,14 @@ service cloud.firestore {
 
           allow delete: if canManageProject(companyId, projectId)
             || colleagueAllows(companyId, projectId, 'editPurchases');
+
+          // Private unit/total cost — creator (OWNER) or ACTIVE EDITOR
+          // (editPurchases) only. Never VIEWER / UPDATE_PROGRESS / CLIENT,
+          // and never via users.role / workspace admin.
+          match /private/{docId} {
+            allow read, create, update, delete: if canManageProject(companyId, projectId)
+              || colleagueAllows(companyId, projectId, 'editPurchases');
+          }
         }
       }
     }

@@ -102,6 +102,13 @@ export const mediaPath = (projectId: string, companyId: string) =>
 export const purchasesPath = (projectId: string, companyId: string) =>
   `${projectPath(projectId, companyId)}/purchases`;
 
+/** Private cost doc — never stored on the public purchase document. */
+export const purchasePrivateCostPath = (
+  projectId: string,
+  purchaseId: string,
+  companyId: string,
+) => `${purchasesPath(projectId, companyId)}/${purchaseId}/private/cost`;
+
 export const remindersPath = (companyId: string) =>
   `${companyRef(companyId)}/reminders`;
 

@@ -399,4 +399,32 @@ describe("Purchases — Client OWNER-read only", () => {
       ),
     );
   });
+
+  it("CLIENT cannot read private purchase cost even for OWNER-responsibility items", async () => {
+    const costPath = `companies/${COMPANY_ID}/projects/${PROJECT_NO_PUBLISH}/purchases/owner/private/cost`;
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const base = `companies/${COMPANY_ID}/projects/${PROJECT_NO_PUBLISH}/purchases`;
+      await setDoc(doc(ctx.firestore(), `${base}/owner`), {
+        projectId: PROJECT_NO_PUBLISH,
+        purchaseResponsibility: "OWNER",
+        photos: [],
+      });
+      await setDoc(doc(ctx.firestore(), costPath), {
+        unitCost: 50,
+        totalCost: 100,
+        updatedBy: CREATOR_UID,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+    });
+    const db = testEnv.authenticatedContext(CLIENT_UID).firestore();
+    await assertSucceeds(
+      getDoc(
+        doc(
+          db,
+          `companies/${COMPANY_ID}/projects/${PROJECT_NO_PUBLISH}/purchases/owner`,
+        ),
+      ),
+    );
+    await assertFails(getDoc(doc(db, costPath)));
+  });
 });

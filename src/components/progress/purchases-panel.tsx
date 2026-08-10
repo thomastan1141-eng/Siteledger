@@ -42,6 +42,8 @@ import {
   parseMoney,
 } from "@/lib/money";
 import {
+  calcPurchaseTotalCost,
+  canViewPrivatePurchaseCost,
   createPurchase,
   deletePurchase,
   duplicatePurchase,
@@ -110,6 +112,7 @@ function defaultForm(
     action: "",
     photos: [],
     coverImageUrl: "",
+    unitCost: null,
   };
 }
 
@@ -190,6 +193,7 @@ export function PurchasesPanel({
       rmbToSgdRate: rate,
       workspaceId: purchaseWs,
       clientOnly: clientMode,
+      includePrivateCost: canManageAllPurchases,
     });
     setItems(list);
   }
@@ -201,15 +205,22 @@ export function PurchasesPanel({
       rmbToSgdRate: rate,
       workspaceId: purchaseWs,
       clientOnly: clientMode,
-    }).then((list) => {
-      if (cancelled) return;
-      setItems(list);
-      setLoading(false);
-    });
+      includePrivateCost: canManageAllPurchases,
+    })
+      .then((list) => {
+        if (cancelled) return;
+        setItems(list);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setItems([]);
+        setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [project.id, category, rate]);
+  }, [project.id, category, rate, canManageAllPurchases, clientMode, purchaseWs]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -221,6 +232,7 @@ export function PurchasesPanel({
   }, [items, search]);
 
   const summary = useMemo(() => summarizeCategory(filtered), [filtered]);
+  const showPrivateCost = canViewPrivatePurchaseCost(purchaseActor);
 
   function flash(state: SaveState) {
     setSaveHint(state);
@@ -276,7 +288,9 @@ export function PurchasesPanel({
   }
 
   function downloadCsv() {
-    const csv = exportPurchasesCsv(filtered);
+    const csv = exportPurchasesCsv(filtered, {
+      includePrivateCost: showPrivateCost,
+    });
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -352,6 +366,12 @@ export function PurchasesPanel({
         <span>{summary.count} items</span>
         <span>Total RMB {formatRmb(summary.totalRMB)}</span>
         <span>Total SGD {formatSgd(summary.totalSGD)}</span>
+        {showPrivateCost ? (
+          <>
+            <span>Total Cost RMB {formatRmb(summary.totalCostRMB)}</span>
+            <span>Total Cost SGD {formatSgd(summary.totalCostSGD)}</span>
+          </>
+        ) : null}
         <span>Rate {rate}</span>
       </div>
 
@@ -398,11 +418,14 @@ export function PurchasesPanel({
             <div className="purchase-table-full-width">
               <div className="purchase-table-scroll site-purchase-table-wrap">
                 <table
-                  className={
-                    category === "LIGHTING"
-                      ? "site-purchase-table site-purchase-table-simple is-lighting"
-                      : "site-purchase-table site-purchase-table-simple is-simple"
-                  }
+                  className={[
+                    "site-purchase-table",
+                    "site-purchase-table-simple",
+                    category === "LIGHTING" ? "is-lighting" : "is-simple",
+                    showPrivateCost ? "is-with-cost" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 >
                   <colgroup>
                     <col className="col-photo" />
@@ -417,6 +440,12 @@ export function PurchasesPanel({
                     <col className="col-unit" />
                     <col className="col-rmb" />
                     <col className="col-sgd" />
+                    {showPrivateCost ? (
+                      <>
+                        <col className="col-cost" />
+                        <col className="col-total-cost" />
+                      </>
+                    ) : null}
                     <col className="col-status" />
                     <col className="col-action" />
                     <col className="col-more" />
@@ -435,6 +464,12 @@ export function PurchasesPanel({
                       <th>Unit Price</th>
                       <th>Total RMB</th>
                       <th>Total SGD</th>
+                      {showPrivateCost ? (
+                        <>
+                          <th>Cost</th>
+                          <th>Total Cost</th>
+                        </>
+                      ) : null}
                       <th>Status</th>
                       <th>Action</th>
                       <th>More</th>
@@ -446,6 +481,7 @@ export function PurchasesPanel({
                         key={item.id}
                         item={item}
                         showLightingSpecs={category === "LIGHTING"}
+                        showPrivateCost={showPrivateCost}
                         canManageAll={canManageAllPurchases}
                         clientMode={clientMode}
                         rate={rate}
@@ -520,6 +556,23 @@ export function PurchasesPanel({
                     {item.currency === "SGD" ? "—" : formatRmb(item.totalRMB)}{" "}
                     · {formatSgd(item.totalSGD)}
                   </p>
+                  {showPrivateCost ? (
+                    <p>
+                      Cost{" "}
+                      {item.unitCost == null
+                        ? "—"
+                        : item.currency === "SGD"
+                          ? formatSgd(item.unitCost)
+                          : formatRmb(item.unitCost)}
+                      {" · "}
+                      Total Cost{" "}
+                      {item.totalCost == null
+                        ? "—"
+                        : item.currency === "SGD"
+                          ? formatSgd(item.totalCost)
+                          : formatRmb(item.totalCost)}
+                    </p>
+                  ) : null}
                   <span
                     className="site-purchase-status"
                     data-status={item.purchaseStatus}
@@ -557,6 +610,7 @@ export function PurchasesPanel({
           user={purchaseActor}
           initial={editing}
           clientMode={clientMode}
+          showPrivateCost={showPrivateCost}
           onClose={() => {
             setFormOpen(false);
             setEditing(null);
@@ -781,6 +835,130 @@ function LocationSummary({ locations }: { locations: string[] }) {
   );
 }
 
+function DescriptionSummary({ description }: { description: string }) {
+  const text = description.trim();
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(
+    null,
+  );
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const labelId = useId();
+  const canExpand = Boolean(text);
+
+  function place() {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const width = 280;
+    const left = Math.min(
+      Math.max(12, rect.left),
+      window.innerWidth - width - 12,
+    );
+    const top = Math.min(rect.bottom + 8, window.innerHeight - 12);
+    setCoords({ top, left });
+  }
+
+  function openPopover() {
+    if (!canExpand) return;
+    place();
+    setOpen(true);
+  }
+
+  function closePopover() {
+    setOpen(false);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t)) return;
+      if (popoverRef.current?.contains(t)) return;
+      setOpen(false);
+    }
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    function onScroll() {
+      place();
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [open]);
+
+  function onKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (open) closePopover();
+      else openPopover();
+    } else if (e.key === "Escape") {
+      closePopover();
+    }
+  }
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="site-purchase-desc-summary"
+        aria-expanded={open}
+        aria-describedby={open ? labelId : undefined}
+        aria-label={text || "No description"}
+        disabled={!canExpand}
+        onMouseEnter={() => {
+          if (window.matchMedia("(hover: hover)").matches) openPopover();
+        }}
+        onMouseLeave={(e) => {
+          if (!window.matchMedia("(hover: hover)").matches) return;
+          const next = e.relatedTarget as Node | null;
+          if (popoverRef.current?.contains(next)) return;
+          closePopover();
+        }}
+        onClick={() => {
+          if (window.matchMedia("(hover: hover)").matches) return;
+          if (open) closePopover();
+          else openPopover();
+        }}
+        onFocus={() => openPopover()}
+        onBlur={(e) => {
+          const next = e.relatedTarget as Node | null;
+          if (popoverRef.current?.contains(next)) return;
+          closePopover();
+        }}
+        onKeyDown={onKeyDown}
+      >
+        {text || "—"}
+      </button>
+      {open && coords && text && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={popoverRef}
+              id={labelId}
+              role="tooltip"
+              className="site-purchase-desc-popover"
+              style={{ top: coords.top, left: coords.left }}
+              onMouseEnter={() => setOpen(true)}
+              onMouseLeave={closePopover}
+            >
+              <pre className="site-purchase-desc-block">{text}</pre>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
 /**
  * Renders dropdown/menu content through a Portal into document.body,
  * positioned relative to `anchorRef` (fixed positioning, viewport-relative).
@@ -876,6 +1054,7 @@ function ActionMenu({
 function PurchaseRow({
   item,
   showLightingSpecs,
+  showPrivateCost,
   canManageAll,
   clientMode,
   rate,
@@ -887,6 +1066,7 @@ function PurchaseRow({
 }: {
   item: PurchaseItem;
   showLightingSpecs: boolean;
+  showPrivateCost: boolean;
   /** Creator or EDITOR-preset colleague only — matches editPurchases. */
   canManageAll: boolean;
   clientMode: boolean;
@@ -911,6 +1091,11 @@ function PurchaseRow({
     rmbToSgdRate: rate,
   });
   const lightingText = formatLightingSpecs(item.lightingSpecifications);
+  const hasCost =
+    item.unitCost != null && Number.isFinite(item.unitCost);
+  const liveTotalCost = hasCost
+    ? calcPurchaseTotalCost(item.quantity, item.unitCost as number)
+    : null;
 
   return (
     <tr>
@@ -932,9 +1117,7 @@ function PurchaseRow({
         <strong className="site-purchase-item-name">{item.itemName}</strong>
       </td>
       <td className="site-purchase-desc-cell">
-        <div className="site-purchase-desc-preview">
-          {item.description || "—"}
-        </div>
+        <DescriptionSummary description={item.description} />
       </td>
       <td className="site-purchase-location-cell">
         <LocationSummary locations={item.locations} />
@@ -1011,6 +1194,49 @@ function PurchaseRow({
       </td>
       <td>{isSgd ? "—" : formatRmb(live.totalRMB)}</td>
       <td>{formatSgd(live.totalSGD)}</td>
+      {showPrivateCost ? (
+        <>
+          <td>
+            {editable ? (
+              <input
+                className="site-purchase-inline site-purchase-price"
+                type="number"
+                min={0}
+                step="any"
+                defaultValue={hasCost ? item.unitCost : ""}
+                key={`cost-${item.id}-${hasCost ? item.unitCost : "empty"}`}
+                placeholder="—"
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  if (!raw) {
+                    if (hasCost) onPatch({ unitCost: null });
+                    return;
+                  }
+                  const value = parseMoney(raw);
+                  if (!hasCost || value !== item.unitCost) {
+                    onPatch({ unitCost: value });
+                  }
+                }}
+              />
+            ) : hasCost ? (
+              isSgd ? (
+                formatSgd(item.unitCost as number)
+              ) : (
+                formatRmb(item.unitCost as number)
+              )
+            ) : (
+              "—"
+            )}
+          </td>
+          <td>
+            {liveTotalCost == null
+              ? "—"
+              : isSgd
+                ? formatSgd(liveTotalCost)
+                : formatRmb(liveTotalCost)}
+          </td>
+        </>
+      ) : null}
       <td>
         {editable ? (
           <select
@@ -1321,6 +1547,9 @@ function PhotoField({
         >
           <ImagePlus size={16} /> Upload photos
         </SiteButton>
+        <span className="site-purchase-muted">
+          Recommended: 1200 × 1200 px or larger for best display quality.
+        </span>
         {pending.length ? (
           <span className="site-purchase-muted">
             {pending.length} photo{pending.length === 1 ? "" : "s"} selected
@@ -1434,6 +1663,7 @@ function PurchaseFormSheet({
   user,
   initial,
   clientMode,
+  showPrivateCost,
   onClose,
   onSaved,
 }: {
@@ -1442,6 +1672,7 @@ function PurchaseFormSheet({
   user?: PurchaseActor | null;
   initial: PurchaseItem | null;
   clientMode: boolean;
+  showPrivateCost: boolean;
   onClose: () => void;
   onSaved: (
     draft: PurchaseInput,
@@ -1474,6 +1705,10 @@ function PurchaseFormSheet({
           action: initial.action,
           photos: [...initialPhotos],
           coverImageUrl: initial.coverImageUrl || "",
+          unitCost:
+            initial.unitCost != null && Number.isFinite(initial.unitCost)
+              ? initial.unitCost
+              : null,
         }
       : defaultForm(category, clientMode),
   );
@@ -1491,6 +1726,10 @@ function PurchaseFormSheet({
   });
   const isLighting = category === "LIGHTING";
   const isSgd = form.currency === "SGD";
+  const formTotalCost =
+    form.unitCost != null && Number.isFinite(form.unitCost)
+      ? calcPurchaseTotalCost(form.quantity, form.unitCost)
+      : null;
 
   useEffect(() => {
     return () => {
@@ -1790,6 +2029,24 @@ function PurchaseFormSheet({
                 />
               </SiteField>
             )}
+            {showPrivateCost ? (
+              <SiteField label="Cost">
+                <SiteInput
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={form.unitCost ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value.trim();
+                    setForm((s) => ({
+                      ...s,
+                      unitCost: raw === "" ? null : parseMoney(raw),
+                    }));
+                  }}
+                  placeholder="Unit cost"
+                />
+              </SiteField>
+            ) : null}
           </div>
           <p className="site-purchase-calc">
             {isSgd ? (
@@ -1811,6 +2068,19 @@ function PurchaseFormSheet({
                 Rate {rate}
               </>
             )}
+            {showPrivateCost ? (
+              <>
+                {" · "}
+                Total Cost:{" "}
+                <strong>
+                  {formTotalCost == null
+                    ? "—"
+                    : isSgd
+                      ? formatSgd(formTotalCost)
+                      : formatRmb(formTotalCost)}
+                </strong>
+              </>
+            ) : null}
           </p>
           <SiteField label="Action">
             <SiteInput

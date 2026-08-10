@@ -2200,28 +2200,28 @@ a.site-chip {
 }
 
 .site-purchase-table-simple.is-lighting .col-desc {
-  width: 13%;
-  min-width: 120px;
+  width: 8%;
+  min-width: 72px;
 }
 
 .site-purchase-table-simple.is-simple .col-desc {
-  width: 14%;
-  min-width: 120px;
+  width: 9%;
+  min-width: 72px;
 }
 
 .site-purchase-table-simple.is-lighting .col-location {
-  width: 11%;
-  min-width: 96px;
+  width: 9%;
+  min-width: 84px;
 }
 
 .site-purchase-table-simple.is-simple .col-location {
-  width: 12%;
-  min-width: 96px;
+  width: 10%;
+  min-width: 84px;
 }
 
 .site-purchase-table-simple .col-specs {
-  width: 10%;
-  min-width: 96px;
+  width: 9%;
+  min-width: 84px;
 }
 
 .site-purchase-table-simple.is-lighting .col-by {
@@ -2266,6 +2266,24 @@ a.site-chip {
   min-width: 60px;
 }
 
+.site-purchase-table-simple.is-with-cost .col-cost,
+.site-purchase-table-simple.is-with-cost .col-total-cost {
+  width: 6%;
+  min-width: 56px;
+}
+
+.site-purchase-table-simple.is-with-cost.is-lighting .col-rmb,
+.site-purchase-table-simple.is-with-cost.is-lighting .col-sgd {
+  width: 6%;
+  min-width: 56px;
+}
+
+.site-purchase-table-simple.is-with-cost.is-simple .col-rmb,
+.site-purchase-table-simple.is-with-cost.is-simple .col-sgd {
+  width: 6%;
+  min-width: 56px;
+}
+
 .site-purchase-table-simple.is-lighting .col-status {
   width: 9%;
   min-width: 84px;
@@ -2299,7 +2317,7 @@ a.site-chip {
 
 .site-purchase-desc-cell {
   min-width: 0;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .site-purchase-desc-preview {
@@ -2313,6 +2331,46 @@ a.site-chip {
   line-height: 1.4;
   color: var(--site-text);
   max-width: 100%;
+}
+
+.site-purchase-desc-summary {
+  display: inline-block;
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--site-text);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--site-text-secondary) 45%, transparent);
+  text-underline-offset: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.site-purchase-desc-summary:disabled {
+  cursor: default;
+  text-decoration: none;
+  color: var(--site-text-secondary);
+}
+
+.site-purchase-desc-popover {
+  position: fixed;
+  z-index: 80;
+  width: min(280px, calc(100vw - 24px));
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--site-border);
+  border-radius: 12px;
+  background: var(--site-surface);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 16%, transparent);
 }
 
 .site-purchase-desc-block {

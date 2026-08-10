@@ -110,7 +110,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "purchaseResponsibility", "order": "ASCENDING" },
-        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
       ]
     },
     {

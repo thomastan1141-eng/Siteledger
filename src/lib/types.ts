@@ -558,6 +558,14 @@ export interface PurchaseItem {
   updatedBy: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Private unit cost — loaded only for Project creator / EDITOR.
+   * Never stored on the public purchase document (subcollection private/cost).
+   * Undefined means not loaded or not set; display as "—".
+   */
+  unitCost?: number;
+  /** Private totalCost = quantity × unitCost (same currency as the item). */
+  totalCost?: number;
 }
 
 export const PURCHASE_CATEGORY_LABELS: Record<PurchaseCategory, string> = {

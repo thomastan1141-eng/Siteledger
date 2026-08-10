@@ -297,3 +297,123 @@ describe("creator retains full control", () => {
     );
   });
 });
+
+describe("top-level users/{uid} profile — self read only", () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, `users/${CREATOR_UID}`), {
+        email: "creator@example.com",
+        role: "admin",
+        active: true,
+        defaultWorkspaceId: COMPANY_ID,
+        onboardingComplete: true,
+      });
+      await setDoc(doc(db, `users/${EDITOR_UID}`), {
+        email: "editor@example.com",
+        role: "staff",
+        active: true,
+        defaultWorkspaceId: COMPANY_ID,
+        onboardingComplete: true,
+      });
+    });
+  });
+
+  it("authenticated user can read users/{ownUid}", async () => {
+    const db = testEnv.authenticatedContext(CREATOR_UID).firestore();
+    await assertSucceeds(getDoc(doc(db, `users/${CREATOR_UID}`)));
+  });
+
+  it("authenticated user cannot read another user's private profile", async () => {
+    const db = testEnv.authenticatedContext(CREATOR_UID).firestore();
+    await assertFails(getDoc(doc(db, `users/${EDITOR_UID}`)));
+  });
+
+  it("users.role admin does not grant Project access by itself", async () => {
+    // COMPANY_ADMIN_UID has companies/{id}/users role=admin but no Project
+    // membership and is not createdBy — Project read must still fail.
+    const db = testEnv.authenticatedContext(COMPANY_ADMIN_UID).firestore();
+    await assertFails(
+      getDoc(doc(db, `companies/${COMPANY_ID}/projects/${PROJECT_A}`)),
+    );
+  });
+});
+
+describe("Purchases private cost — OWNER/EDITOR only", () => {
+  const costPath = `companies/${COMPANY_ID}/projects/${PROJECT_A}/purchases/item-1/private/cost`;
+  const purchasePath = `companies/${COMPANY_ID}/projects/${PROJECT_A}/purchases/item-1`;
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), purchasePath), {
+        projectId: PROJECT_A,
+        purchaseResponsibility: "STUDIO",
+        itemName: "Downlight",
+        quantity: 2,
+      });
+      await setDoc(doc(ctx.firestore(), costPath), {
+        unitCost: 10,
+        totalCost: 20,
+        updatedBy: CREATOR_UID,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+    });
+  });
+
+  it("creator (OWNER) can read and write private cost", async () => {
+    const db = testEnv.authenticatedContext(CREATOR_UID).firestore();
+    await assertSucceeds(getDoc(doc(db, costPath)));
+    await assertSucceeds(
+      setDoc(doc(db, costPath), {
+        unitCost: 12,
+        totalCost: 24,
+        updatedBy: CREATOR_UID,
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      }),
+    );
+  });
+
+  it("EDITOR can read and write private cost", async () => {
+    const db = testEnv.authenticatedContext(EDITOR_UID).firestore();
+    await assertSucceeds(getDoc(doc(db, costPath)));
+    await assertSucceeds(
+      updateDoc(doc(db, costPath), {
+        unitCost: 11,
+        totalCost: 22,
+        updatedBy: EDITOR_UID,
+      }),
+    );
+  });
+
+  it("VIEW_ONLY cannot read or write private cost", async () => {
+    const db = testEnv.authenticatedContext(VIEW_ONLY_UID).firestore();
+    await assertFails(getDoc(doc(db, costPath)));
+    await assertFails(
+      setDoc(doc(db, costPath), {
+        unitCost: 99,
+        totalCost: 198,
+        updatedBy: VIEW_ONLY_UID,
+      }),
+    );
+  });
+
+  it("UPDATE_PROGRESS cannot read or write private cost", async () => {
+    const db = testEnv.authenticatedContext(UPDATE_PROGRESS_UID).firestore();
+    await assertFails(getDoc(doc(db, costPath)));
+    await assertFails(
+      updateDoc(doc(db, costPath), { unitCost: 1, totalCost: 2 }),
+    );
+  });
+
+  it("workspace admin / company admin cannot read private cost", async () => {
+    const adminDb = testEnv.authenticatedContext(COMPANY_ADMIN_UID).firestore();
+    await assertFails(getDoc(doc(adminDb, costPath)));
+    const wsDb = testEnv.authenticatedContext(WORKSPACE_OWNER_UID).firestore();
+    await assertFails(getDoc(doc(wsDb, costPath)));
+  });
+
+  it("outsider cannot read private cost", async () => {
+    const db = testEnv.authenticatedContext(OUTSIDER_UID).firestore();
+    await assertFails(getDoc(doc(db, costPath)));
+  });
+});

@@ -3,10 +3,12 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -22,6 +24,7 @@ import { COMPANY_ID } from "../constants";
 import { compressImageFile } from "../image-compress";
 import { calcPurchaseTotals, roundMoney } from "../money";
 import {
+  purchasePrivateCostPath,
   purchasesPath,
   requireTenantId,
   storagePurchasePhotoPath,
@@ -74,7 +77,31 @@ export type PurchaseInput = {
   unitPriceSGD: number;
   purchaseStatus: PurchaseStatus;
   action?: string;
+  /**
+   * Private unit cost in the item's currency.
+   * `null` clears an existing private cost; omit to leave unchanged on update.
+   */
+  unitCost?: number | null;
 };
+
+export type PurchasePrivateCost = {
+  unitCost: number;
+  totalCost: number;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+/** totalCost = quantity × unitCost (same currency as the purchase item). */
+export function calcPurchaseTotalCost(quantity: number, unitCost: number) {
+  return roundMoney(Math.max(0, quantity) * Math.max(0, unitCost));
+}
+
+/** Private cost is visible/editable only to creator/EDITOR (canManageAll). */
+export function canViewPrivatePurchaseCost(
+  actor: PurchaseActor | null | undefined,
+) {
+  return actor?.canManageAll === true;
+}
 
 let demoPurchases: PurchaseItem[] = [
   {
@@ -169,6 +196,155 @@ let demoPurchases: PurchaseItem[] = [
 const demoRates: Record<string, number> = {
   "demo-berwick": DEFAULT_RMB_TO_SGD_RATE,
 };
+
+/** Demo-only private cost store keyed by purchaseId. */
+let demoPrivateCosts: Record<string, PurchasePrivateCost> = {};
+
+function mapPrivateCostData(
+  data: Record<string, unknown> | undefined,
+): PurchasePrivateCost | null {
+  if (!data) return null;
+  const unitCost = Number(data.unitCost);
+  if (!Number.isFinite(unitCost)) return null;
+  const totalCost = Number(data.totalCost);
+  return {
+    unitCost: roundMoney(Math.max(0, unitCost)),
+    totalCost: Number.isFinite(totalCost)
+      ? roundMoney(Math.max(0, totalCost))
+      : calcPurchaseTotalCost(0, unitCost),
+    updatedAt: serializePurchaseTimestamp(data.updatedAt) || nowIso(),
+    updatedBy: String(data.updatedBy || ""),
+  };
+}
+
+async function readPrivateCost(
+  projectId: string,
+  purchaseId: string,
+  workspaceId: string,
+): Promise<PurchasePrivateCost | null> {
+  if (AUTH_BYPASS) {
+    return demoPrivateCosts[purchaseId] || null;
+  }
+  try {
+    const snap = await getDoc(
+      doc(
+        getFirebaseDb(),
+        purchasePrivateCostPath(projectId, purchaseId, workspaceId),
+      ),
+    );
+    if (!snap.exists()) return null;
+    return mapPrivateCostData(snap.data() as Record<string, unknown>);
+  } catch {
+    // Missing private/cost rules (or no permission) must not block the
+    // public purchases list — treat as "no cost entered".
+    return null;
+  }
+}
+
+async function writePrivateCost(
+  projectId: string,
+  purchaseId: string,
+  workspaceId: string,
+  unitCost: number,
+  quantity: number,
+  actorUid: string,
+): Promise<PurchasePrivateCost> {
+  const payload: PurchasePrivateCost = {
+    unitCost: roundMoney(Math.max(0, unitCost)),
+    totalCost: calcPurchaseTotalCost(quantity, unitCost),
+    updatedAt: nowIso(),
+    updatedBy: actorUid,
+  };
+  if (AUTH_BYPASS) {
+    demoPrivateCosts[purchaseId] = payload;
+    return payload;
+  }
+  await setDoc(
+    doc(
+      getFirebaseDb(),
+      purchasePrivateCostPath(projectId, purchaseId, workspaceId),
+    ),
+    {
+      unitCost: payload.unitCost,
+      totalCost: payload.totalCost,
+      updatedBy: actorUid,
+      updatedAt: serverTimestamp(),
+    },
+  );
+  return payload;
+}
+
+async function deletePrivateCost(
+  projectId: string,
+  purchaseId: string,
+  workspaceId: string,
+) {
+  if (AUTH_BYPASS) {
+    delete demoPrivateCosts[purchaseId];
+    return;
+  }
+  try {
+    await deleteDoc(
+      doc(
+        getFirebaseDb(),
+        purchasePrivateCostPath(projectId, purchaseId, workspaceId),
+      ),
+    );
+  } catch {
+    /* missing doc is fine */
+  }
+}
+
+function mergePrivateCost(
+  item: PurchaseItem,
+  cost: PurchasePrivateCost | null,
+): PurchaseItem {
+  if (!cost) {
+    const { unitCost: _u, totalCost: _t, ...rest } = item;
+    void _u;
+    void _t;
+    return rest;
+  }
+  return {
+    ...item,
+    unitCost: cost.unitCost,
+    totalCost: cost.totalCost,
+  };
+}
+
+/** Normalize Firestore Timestamp / ISO string for ordering & display. */
+function serializePurchaseTimestamp(value: unknown): string {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object") {
+    const v = value as { toDate?: () => Date; seconds?: number };
+    if (typeof v.toDate === "function") {
+      try {
+        return v.toDate().toISOString();
+      } catch {
+        return "";
+      }
+    }
+    if (typeof v.seconds === "number") {
+      return new Date(v.seconds * 1000).toISOString();
+    }
+  }
+  return "";
+}
+
+/** Oldest first; missing createdAt stays ahead of dated rows; id tie-break. */
+function sortPurchasesOldestFirst(items: PurchaseItem[]): PurchaseItem[] {
+  return [...items].sort((a, b) => {
+    const aKey = a.createdAt || "";
+    const bKey = b.createdAt || "";
+    if (aKey !== bKey) {
+      if (!aKey) return -1;
+      if (!bKey) return 1;
+      return aKey < bKey ? -1 : 1;
+    }
+    return a.id.localeCompare(b.id);
+  });
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -327,8 +503,11 @@ export function mapPurchase(
     action: String(data.action || ""),
     createdBy: String(data.createdBy || ""),
     updatedBy: String(data.updatedBy || ""),
-    createdAt: String(data.createdAt || nowIso()),
-    updatedAt: String(data.updatedAt || nowIso()),
+    // Keep empty when missing so chronological sort stays stable for legacy rows.
+    createdAt: serializePurchaseTimestamp(data.createdAt),
+    updatedAt:
+      serializePurchaseTimestamp(data.updatedAt) ||
+      serializePurchaseTimestamp(data.createdAt),
   };
 }
 
@@ -377,6 +556,8 @@ export async function listPurchases(
     rmbToSgdRate?: number;
     workspaceId?: string;
     clientOnly?: boolean;
+    /** When true, merge private/cost for creator/EDITOR callers only. */
+    includePrivateCost?: boolean;
   },
 ) {
   const rate = getProjectRmbRate(projectId, options?.rmbToSgdRate);
@@ -399,12 +580,13 @@ export async function listPurchases(
     );
     const snap = await getDocs(
       options?.clientOnly
-        ? query(
+        ? // Filter only — chronological order applied in sortPurchasesOldestFirst
+          // (avoids requiring a new composite index before the next indexes deploy).
+          query(
             purchasesRef,
             where("purchaseResponsibility", "==", "OWNER"),
-            orderBy("updatedAt", "desc"),
           )
-        : query(purchasesRef, orderBy("updatedAt", "desc")),
+        : query(purchasesRef, orderBy("createdAt", "asc")),
     );
     items = snap.docs.map((d) => mapPurchase(d.id, d.data(), rate));
   }
@@ -415,6 +597,18 @@ export async function listPurchases(
   if (options?.category) {
     items = items.filter((p) => p.category === options.category);
   }
+  // Oldest → newest within the result set. Demo path has no Firestore orderBy;
+  // also stabilizes legacy rows that share / lack createdAt via id tie-break.
+  items = sortPurchasesOldestFirst(items);
+
+  if (options?.includePrivateCost) {
+    items = await Promise.all(
+      items.map(async (item) =>
+        mergePrivateCost(item, await readPrivateCost(projectId, item.id, ws)),
+      ),
+    );
+  }
+
   return items;
 }
 
@@ -477,7 +671,21 @@ export async function createPurchase(
 
   if (AUTH_BYPASS) {
     const item = { id: `pur-${Date.now()}`, ...data };
-    demoPurchases = [item, ...demoPurchases];
+    demoPurchases = [...demoPurchases, item];
+    if (
+      input.unitCost != null &&
+      Number.isFinite(Number(input.unitCost))
+    ) {
+      const cost = await writePrivateCost(
+        projectId,
+        item.id,
+        ws,
+        Number(input.unitCost),
+        totals.quantity,
+        actor.uid,
+      );
+      return { ...item, unitCost: cost.unitCost, totalCost: cost.totalCost };
+    }
     return item;
   }
 
@@ -486,7 +694,22 @@ export async function createPurchase(
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  return { id: refDoc.id, ...data };
+  const created: PurchaseItem = { id: refDoc.id, ...data };
+  if (
+    input.unitCost != null &&
+    Number.isFinite(Number(input.unitCost))
+  ) {
+    const cost = await writePrivateCost(
+      projectId,
+      refDoc.id,
+      ws,
+      Number(input.unitCost),
+      totals.quantity,
+      actor.uid,
+    );
+    return { ...created, unitCost: cost.unitCost, totalCost: cost.totalCost };
+  }
+  return created;
 }
 
 export async function updatePurchase(
@@ -573,14 +796,46 @@ export async function updatePurchase(
     demoPurchases = demoPurchases.map((p) =>
       p.id === purchaseId ? { ...p, ...payload } : p,
     );
-    return { ...existing, ...payload, id: purchaseId };
+  } else {
+    await updateDoc(doc(getFirebaseDb(), purchasesPath(projectId, ws), purchaseId), {
+      ...payload,
+      updatedAt: serverTimestamp(),
+    });
   }
 
-  await updateDoc(doc(getFirebaseDb(), purchasesPath(projectId, ws), purchaseId), {
-    ...payload,
-    updatedAt: serverTimestamp(),
-  });
-  return { ...existing, ...payload, id: purchaseId };
+  const existingCost = await readPrivateCost(projectId, purchaseId, ws);
+  const costInPatch = Object.prototype.hasOwnProperty.call(patch, "unitCost");
+  let mergedCost: PurchasePrivateCost | null = existingCost;
+
+  if (costInPatch) {
+    if (patch.unitCost == null || !Number.isFinite(Number(patch.unitCost))) {
+      await deletePrivateCost(projectId, purchaseId, ws);
+      mergedCost = null;
+    } else {
+      mergedCost = await writePrivateCost(
+        projectId,
+        purchaseId,
+        ws,
+        Number(patch.unitCost),
+        totals.quantity,
+        actor.uid,
+      );
+    }
+  } else if (existingCost && patch.quantity !== undefined) {
+    mergedCost = await writePrivateCost(
+      projectId,
+      purchaseId,
+      ws,
+      existingCost.unitCost,
+      totals.quantity,
+      actor.uid,
+    );
+  }
+
+  return mergePrivateCost(
+    { ...existing, ...payload, id: purchaseId },
+    mergedCost,
+  );
 }
 
 /** Recalculate SGD totals after project exchange rate changes. */
@@ -646,7 +901,10 @@ export async function deletePurchase(
           }
         }),
     );
+    await deletePrivateCost(projectId, purchaseId, ws);
     await deleteDoc(doc(getFirebaseDb(), purchasesPath(projectId, ws), purchaseId));
+  } else {
+    await deletePrivateCost(projectId, purchaseId, ws);
   }
   demoPurchases = demoPurchases.filter((p) => p.id !== purchaseId);
 }
@@ -659,9 +917,13 @@ export async function duplicatePurchase(
   workspaceId?: string,
 ) {
   const ws = purchaseWorkspace(workspaceId);
-  const existing = (await listPurchases(projectId, { rmbToSgdRate, workspaceId: ws })).find(
-    (p) => p.id === purchaseId,
-  );
+  const existing = (
+    await listPurchases(projectId, {
+      rmbToSgdRate,
+      workspaceId: ws,
+      includePrivateCost: true,
+    })
+  ).find((p) => p.id === purchaseId);
   if (!existing) throw new Error("Purchase item not found");
   if (actor.isClient || !canManagePurchase(actor, existing)) {
     throw new Error("Cannot duplicate this item.");
@@ -685,6 +947,10 @@ export async function duplicatePurchase(
       unitPriceSGD: existing.unitPriceSGD,
       purchaseStatus: "TO_CONFIRM",
       action: existing.action,
+      unitCost:
+        existing.unitCost != null && Number.isFinite(existing.unitCost)
+          ? existing.unitCost
+          : null,
     },
     actor,
     rmbToSgdRate,
@@ -833,14 +1099,27 @@ export async function removePurchasePhoto(
 
 export function summarizeCategory(items: PurchaseItem[]) {
   const active = items.filter((i) => i.purchaseStatus !== "CANCELLED");
+  let totalCostRMB = 0;
+  let totalCostSGD = 0;
+  for (const item of active) {
+    if (item.totalCost == null || !Number.isFinite(item.totalCost)) continue;
+    if (item.currency === "SGD") totalCostSGD += item.totalCost;
+    else totalCostRMB += item.totalCost;
+  }
   return {
     count: items.length,
     totalRMB: roundMoney(active.reduce((s, i) => s + i.totalRMB, 0)),
     totalSGD: roundMoney(active.reduce((s, i) => s + i.totalSGD, 0)),
+    totalCostRMB: roundMoney(totalCostRMB),
+    totalCostSGD: roundMoney(totalCostSGD),
   };
 }
 
-export function exportPurchasesCsv(items: PurchaseItem[]) {
+export function exportPurchasesCsv(
+  items: PurchaseItem[],
+  options?: { includePrivateCost?: boolean },
+) {
+  const includeCost = options?.includePrivateCost === true;
   const headers = [
     "Category",
     "Item",
@@ -856,6 +1135,7 @@ export function exportPurchasesCsv(items: PurchaseItem[]) {
     "Unit Price",
     "Total RMB",
     "Total SGD",
+    ...(includeCost ? ["Cost", "Total Cost"] : []),
     "Status",
     "Action",
     "Cover photo URL",
@@ -875,6 +1155,12 @@ export function exportPurchasesCsv(items: PurchaseItem[]) {
     String(item.currency === "SGD" ? item.unitPriceSGD : item.unitPriceRMB),
     item.currency === "SGD" ? "" : String(item.totalRMB),
     String(item.totalSGD),
+    ...(includeCost
+      ? [
+          item.unitCost != null ? String(item.unitCost) : "",
+          item.totalCost != null ? String(item.totalCost) : "",
+        ]
+      : []),
     item.purchaseStatus,
     item.action || "",
     item.coverImageUrl || "",

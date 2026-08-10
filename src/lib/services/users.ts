@@ -6,7 +6,7 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { getFirebaseDb } from "../firebase";
+import { getFirebaseAuth, getFirebaseDb } from "../firebase";
 import { COMPANY_ID } from "../constants";
 import { AUTH_BYPASS, DEMO_ADMIN, DEMO_CLIENT } from "../demo";
 import {
@@ -32,6 +32,15 @@ export async function getUserProfile(uid: string): Promise<AppUser | null> {
       onboardingComplete: true,
       emailVerified: true,
     };
+  }
+
+  // Ensure the Auth ID token is attached to the Firestore client before the
+  // self-profile read. onAuthStateChanged can fire slightly before Firestore
+  // has the token, which surfaces as permission-denied on users/{uid} even
+  // though rules already allow request.auth.uid == userId.
+  const current = getFirebaseAuth().currentUser;
+  if (current?.uid === uid) {
+    await current.getIdToken();
   }
 
   const accountSnap = await getDoc(doc(getFirebaseDb(), accountUserPath(uid)));
