@@ -17,6 +17,12 @@ import { getFirestore } from "firebase-admin/firestore";
 function initAdmin(): App {
   if (getApps().length) return getApps()[0]!;
 
+  // Required for getStorage().bucket() (no explicit name) to resolve a
+  // default bucket — without this every Admin Storage call throws
+  // "Bucket name not specified or invalid" (surfaces as a generic 500 from
+  // routes like /api/media/[mediaId]/download and /visibility).
+  const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+
   const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (json) {
     const parsed = JSON.parse(json) as {
@@ -30,12 +36,14 @@ function initAdmin(): App {
         clientEmail: parsed.client_email,
         privateKey: parsed.private_key?.replace(/\\n/g, "\n"),
       }),
+      storageBucket,
     });
   }
 
   return initializeApp({
     credential: applicationDefault(),
     projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket,
   });
 }
 
