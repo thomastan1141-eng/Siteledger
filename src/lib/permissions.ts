@@ -1,4 +1,50 @@
-import type { ColleaguePermissions, ColleaguePreset } from "./types";
+import type {
+  ColleaguePermissions,
+  ColleaguePreset,
+  ProjectAccessLevel,
+} from "./types";
+
+/**
+ * Map any historical/canonical access string into ProjectAccessLevel.
+ * VIEW_ONLY (legacy permissionPreset) ≡ VIEWER (canonical accessLevel).
+ */
+export function resolveAccessLevel(
+  raw: string | null | undefined,
+): ProjectAccessLevel | null {
+  const value = String(raw || "").trim().toUpperCase();
+  if (value === "VIEWER" || value === "VIEW_ONLY") return "VIEWER";
+  if (value === "UPDATE_PROGRESS") return "UPDATE_PROGRESS";
+  if (value === "EDITOR") return "EDITOR";
+  return null;
+}
+
+/** Prefer accessLevel; fall back to legacy permissionPreset. */
+export function resolveMemberAccessLevel(member: {
+  accessLevel?: string | null;
+  permissionPreset?: string | null;
+}): ProjectAccessLevel | null {
+  return (
+    resolveAccessLevel(member.accessLevel) ||
+    resolveAccessLevel(member.permissionPreset)
+  );
+}
+
+/**
+ * Legacy ColleaguePreset used by Rules/permissionsForPreset.
+ * VIEWER → VIEW_ONLY so existing Rules keep matching without a rewrite.
+ */
+export function accessLevelToLegacyPreset(
+  level: ProjectAccessLevel,
+): Exclude<ColleaguePreset, "CUSTOM"> {
+  if (level === "VIEWER") return "VIEW_ONLY";
+  return level;
+}
+
+export function colleaguePresetToAccessLevel(
+  preset: ColleaguePreset | string | null | undefined,
+): ProjectAccessLevel | null {
+  return resolveAccessLevel(preset);
+}
 
 export const EMPTY_COLLEAGUE_PERMISSIONS: ColleaguePermissions = {
   viewProject: false,

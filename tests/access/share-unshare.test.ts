@@ -212,6 +212,7 @@ describe("shareProjectAccess", () => {
       `companies/${WORKSPACE}/projects/${PROJECT}/members/colleague-1`,
     );
     expect(member?.status).toBe("ACTIVE");
+    expect(member?.accessLevel).toBe("EDITOR");
     expect(member?.permissionPreset).toBe("EDITOR");
     expect(member?.memberType).toBe("COLLEAGUE");
 
@@ -251,6 +252,7 @@ describe("shareProjectAccess", () => {
       `companies/${WORKSPACE}/projects/${PROJECT}/members/colleague-1`,
     );
     expect(member?.permissionPreset).toBe("VIEW_ONLY");
+    expect(member?.accessLevel).toBe("VIEWER");
   });
 });
 

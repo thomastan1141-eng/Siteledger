@@ -8,6 +8,8 @@ import {
 } from "@/lib/server/invitations";
 import { writeAuditEvent } from "@/lib/server/audit";
 import {
+  accessLevelToLegacyPreset,
+  colleaguePresetToAccessLevel,
   mergePermissions,
   permissionsForPreset,
 } from "@/lib/permissions";
@@ -177,6 +179,16 @@ export async function shareProjectAccess(input: {
 
   const memberType = input.inviteType === "CLIENT" ? "CLIENT" : "COLLEAGUE";
   const memberRole = input.inviteType === "CLIENT" ? "CLIENT" : "COLLEAGUE";
+  // Canonical accessLevel + legacy permissionPreset (VIEWER ≡ VIEW_ONLY).
+  // Rules still whitelist VIEW_ONLY; new code prefers accessLevel.
+  const accessLevel =
+    input.inviteType === "CLIENT"
+      ? "VIEWER"
+      : colleaguePresetToAccessLevel(colleague?.preset) || "VIEWER";
+  const permissionPreset =
+    input.inviteType === "CLIENT"
+      ? "CLIENT"
+      : accessLevelToLegacyPreset(accessLevel);
 
   const batch = db.batch();
 
@@ -190,10 +202,8 @@ export async function shareProjectAccess(input: {
       email: target.email,
       role: memberRole,
       memberType,
-      permissionPreset:
-        input.inviteType === "CLIENT"
-          ? "CLIENT"
-          : colleague?.preset || "VIEW_ONLY",
+      accessLevel,
+      permissionPreset,
       permissions: input.inviteType === "CLIENT" ? null : colleague?.permissions,
       status: "ACTIVE",
       invitedBy: input.actorUid,

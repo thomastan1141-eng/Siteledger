@@ -1,6 +1,7 @@
 "use client";
 
 import { SecureBunnyPlayer } from "@/components/media/secure-bunny-player";
+import { SecureStorageAsset } from "@/components/progress/media-grid";
 import { SiteEmpty, SitePageHeader } from "@/components/progress/primitives";
 import { useClientProject } from "@/lib/client-project";
 import { formatDate } from "@/lib/utils";
@@ -28,18 +29,21 @@ export default function ClientVideosPage() {
               {video.provider === "BUNNY_STREAM" ? (
                 <SecureBunnyPlayer item={video} workspaceId={workspaceId} />
               ) : (
-                <video
-                  src={video.downloadUrl}
-                  controls
-                  playsInline
-                  preload="metadata"
+                <div
                   style={{
                     width: "100%",
                     aspectRatio: "16 / 9",
                     background: "#111",
                     borderRadius: 12,
+                    overflow: "hidden",
                   }}
-                />
+                >
+                  <SecureStorageAsset
+                    item={video}
+                    video
+                    className="h-full w-full"
+                  />
+                </div>
               )}
               <div style={{ marginTop: 10 }}>
                 <div style={{ fontWeight: 650 }}>{formatDate(video.date)}</div>

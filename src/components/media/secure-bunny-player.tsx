@@ -83,8 +83,7 @@ export function SecureBunnyPlayer({
         }}
       >
         <BunnyThumbnail
-          item={item}
-          workspaceId={workspaceId}
+          src={item.thumbnailUrl}
           alt={title}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />

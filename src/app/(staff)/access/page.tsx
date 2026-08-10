@@ -334,7 +334,7 @@ export default function ProjectAccessPage() {
                   {SHARE_PRESETS.map((preset) => (
                     <option key={preset} value={preset}>
                       {preset === "VIEW_ONLY"
-                        ? "View only"
+                        ? "Viewer"
                         : preset === "UPDATE_PROGRESS"
                           ? "Update progress"
                           : "Editor"}

@@ -44,6 +44,19 @@ describe("resolveEffectivePermissions — named presets with no stored override"
     expect(perms?.editPurchases).toBe(false);
   });
 
+  it("canonical VIEWER accessLevel matches VIEW_ONLY rights", () => {
+    const perms = resolveEffectivePermissions({
+      isOwner: false,
+      memberType: "COLLEAGUE",
+      accessLevel: "VIEWER",
+      permissionPreset: null,
+    });
+    expect(perms?.viewMedia).toBe(true);
+    expect(perms?.downloadMedia).toBe(true);
+    expect(perms?.uploadMedia).toBe(false);
+    expect(perms?.manageProjectAccess).toBe(false);
+  });
+
   it("UPDATE_PROGRESS resolves own-scope update/journal/media only", () => {
     const perms = resolveEffectivePermissions({
       isOwner: false,

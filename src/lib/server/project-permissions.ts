@@ -109,20 +109,23 @@ async function loadProjectPermissionContext(
   const permissionPreset = memberData
     ? (memberData.permissionPreset as string) || null
     : null;
+  const accessLevel = memberData
+    ? (memberData.accessLevel as string) || null
+    : null;
   const rawPermissions =
     memberData &&
     memberData.permissions &&
     typeof memberData.permissions === "object"
       ? (memberData.permissions as Record<string, unknown>)
       : null;
-  // Single source of truth for preset -> permission-map resolution (also used
-  // by project-directory.ts for the Projects list / resolve API), so a
-  // Colleague's effective rights are identical everywhere they're checked.
+  // Single source of truth for accessLevel/preset -> permission-map resolution
+  // (also used by project-directory.ts for the Projects list / resolve API).
   const permissions = isCreator
     ? null
     : resolveEffectivePermissions({
         isOwner: false,
         memberType,
+        accessLevel,
         permissionPreset,
         permissions: rawPermissions,
       });

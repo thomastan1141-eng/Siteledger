@@ -44,6 +44,13 @@ export type ColleaguePreset =
   | "EDITOR"
   | "CUSTOM";
 
+/**
+ * Canonical Project access level for shared members.
+ * OWNER is never stored on members — it is derived from project.createdBy.
+ * VIEWER is the product name; historical docs may still say VIEW_ONLY.
+ */
+export type ProjectAccessLevel = "VIEWER" | "UPDATE_PROGRESS" | "EDITOR";
+
 export type InvitationStatus =
   | "PENDING"
   | "ACCEPTED"
@@ -144,6 +151,13 @@ export interface ProjectMember {
   /** Legacy role field — prefer memberType. */
   role: ProjectAccessRole;
   memberType?: ProjectMemberType;
+  /** Canonical shared-member access level. Prefer this over permissionPreset. */
+  accessLevel?: ProjectAccessLevel | null;
+  /**
+   * Legacy preset mirror (VIEW_ONLY ≡ VIEWER). Still written on new shares so
+   * existing Firestore/Storage Rules that whitelist VIEW_ONLY keep working
+   * without a broad Rules rewrite.
+   */
   permissionPreset?:
     | "OWNER"
     | "CLIENT"

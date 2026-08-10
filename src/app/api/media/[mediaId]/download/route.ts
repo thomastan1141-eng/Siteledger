@@ -4,7 +4,6 @@ import {
   verifyAuthenticatedRequest,
 } from "@/lib/server/auth";
 import { getAdminDb } from "@/lib/firebase-admin";
-import { getStorage } from "firebase-admin/storage";
 import {
   createSignedCdnUrl,
   getBunnyVideo,
@@ -17,10 +16,13 @@ import {
 export const runtime = "nodejs";
 
 /**
- * Authorised download metadata.
- * Photos: returns a short-lived signed Storage URL.
- * Bunny videos: returns MP4 CDN URL only when fallback file exists.
- * Does not proxy video bytes through App Hosting.
+ * Bunny video download metadata only. Normal Firebase Storage photos never
+ * use this route — the media grid reads Storage objects directly through
+ * the authenticated Firebase Web SDK (getBlob), which re-evaluates Storage
+ * Rules on every request. That removes the Admin SDK / IAM signBlob
+ * dependency for the common photo-viewing path entirely.
+ * Bunny videos still get a short-lived, token-authenticated MP4 CDN URL
+ * (never proxies video bytes through App Hosting).
  */
 export async function POST(
   request: Request,
@@ -78,27 +80,14 @@ export async function POST(
       }
     }
 
-    if (m.type === "photo" || m.provider !== "BUNNY_STREAM") {
-      const storagePath = String(m.storagePath || "");
-      if (!storagePath) {
-        return NextResponse.json(
-          { error: "No downloadable file." },
-          { status: 404 },
-        );
-      }
-      const [url] = await getStorage()
-        .bucket()
-        .file(storagePath)
-        .getSignedUrl({
-          action: "read",
-          expires: Date.now() + 10 * 60 * 1000,
-        });
-      return NextResponse.json({
-        ok: true,
-        kind: "photo",
-        url,
-        fileName: m.fileName || m.originalFileName || "photo.jpg",
-      });
+    if (m.provider !== "BUNNY_STREAM" || !m.bunnyVideoId) {
+      return NextResponse.json(
+        {
+          error:
+            "Firebase Storage photos are viewed directly via the Storage SDK and have no server download endpoint.",
+        },
+        { status: 404 },
+      );
     }
 
     // Bunny video

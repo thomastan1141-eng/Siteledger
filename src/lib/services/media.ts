@@ -8,7 +8,6 @@ import {
   setDoc,
   updateDoc,
   where,
-  writeBatch,
 } from "firebase/firestore";
 import {
   ref,
@@ -101,8 +100,8 @@ export async function uploadMediaFile(
 
   return {
     storagePath: path,
-    // Never persist a Firebase download-token URL. UI requests a short-lived
-    // signed URL from /api/media/{mediaId}/download after ACL validation.
+    // Photos are displayed via Storage Web SDK getBlob(storagePath) under
+    // Storage Rules — never persist a permanent Firebase download-token URL.
     downloadUrl: "",
     sizeBytes: file.size,
     contentType: file.type || "application/octet-stream",
@@ -269,25 +268,6 @@ export async function listMedia(
   }
 
   return items;
-}
-
-export async function updateMediaVisibility(
-  projectId: string,
-  mediaIds: string[],
-  visibility: MediaVisibility,
-  workspaceId?: string,
-) {
-  const ws = requireTenantId(workspaceId);
-  const batch = writeBatch(getFirebaseDb());
-  mediaIds.forEach((id) => {
-    batch.update(doc(getFirebaseDb(), mediaPath(projectId, ws), id), {
-      visibility,
-      clientVisible:
-        visibility === "client_visible" || visibility === "handover",
-      updatedAt: new Date().toISOString(),
-    });
-  });
-  await batch.commit();
 }
 
 export async function updateMediaCaption(

@@ -294,7 +294,6 @@ export async function fetchBunnyPlayback(input: {
   return data as {
     embedUrl: string;
     expires: number;
-    thumbnailUrl?: string | null;
   };
 }
 

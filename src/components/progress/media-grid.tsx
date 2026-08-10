@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getBlob, ref } from "firebase/storage";
 import { AlertTriangle, ChevronLeft, ChevronRight, Eye, EyeOff, X } from "lucide-react";
 import { BunnyThumbnail } from "@/components/media/bunny-thumbnail";
 import { SecureBunnyPlayer } from "@/components/media/secure-bunny-player";
@@ -9,7 +10,7 @@ import {
   syncBunnyMedia,
 } from "@/lib/bunny/client-upload";
 import { setMediaClientVisible } from "@/lib/services/media";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getFirebaseStorage } from "@/lib/firebase";
 import type { MediaItem } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 import { SiteButton, SiteEmpty, SitePill } from "./primitives";
@@ -36,58 +37,71 @@ function isClientVisible(item: MediaItem) {
   );
 }
 
-async function requestSecureMediaUrl(
-  item: MediaItem,
-  workspaceId?: string,
-): Promise<string> {
-  const user = getFirebaseAuth().currentUser;
-  const ws = workspaceId || item.workspaceId || item.companyId;
-  if (!user || !ws) throw new Error("Media access is unavailable.");
-  const token = await user.getIdToken();
-  const response = await fetch(`/api/media/${encodeURIComponent(item.id)}/download`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ projectId: item.projectId, workspaceId: ws }),
-  });
-  const payload = (await response.json().catch(() => ({}))) as {
-    url?: string;
-    error?: string;
-  };
-  if (!response.ok || !payload.url) {
-    throw new Error(payload.error || "Media access is unavailable.");
-  }
-  return payload.url;
+/**
+ * Loads a Storage object straight through the authenticated Firebase Web
+ * SDK. Every call re-evaluates Storage Rules against the current session —
+ * no server-minted signed URL, no Admin SDK, no IAM signBlob. Access follows
+ * the same OWNER/ACTIVE-member/clientVisible rules Storage Rules already
+ * enforce, so Unshare (member.status = "REMOVED") denies the very next read.
+ */
+async function loadStorageBlobUrl(storagePath: string): Promise<string> {
+  const blob = await getBlob(ref(getFirebaseStorage(), storagePath));
+  return URL.createObjectURL(blob);
+}
+
+/** Downloads a photo to the user's device via the same Storage Rules path — no server round-trip. */
+async function downloadStorageAsset(item: MediaItem) {
+  if (!item.storagePath) throw new Error("No downloadable file.");
+  const objectUrl = await loadStorageBlobUrl(item.storagePath);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = item.fileName || item.originalFileName || "photo.jpg";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
 export function SecureStorageAsset({
   item,
-  workspaceId,
   video = false,
   className,
 }: {
   item: MediaItem;
-  workspaceId?: string;
   video?: boolean;
   className?: string;
 }) {
   const [url, setUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+
   useEffect(() => {
+    setFailed(false);
+    setUrl("");
+    if (!item.storagePath) {
+      setFailed(true);
+      return;
+    }
     let active = true;
-    requestSecureMediaUrl(item, workspaceId)
+    let objectUrl = "";
+    loadStorageBlobUrl(item.storagePath)
       .then((next) => {
-        if (active) setUrl(next);
+        if (!active) {
+          URL.revokeObjectURL(next);
+          return;
+        }
+        objectUrl = next;
+        setUrl(next);
       })
       .catch(() => {
-        if (active) setUrl("");
+        if (active) setFailed(true);
       });
     return () => {
       active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [item.id, item.projectId, item.workspaceId, item.companyId, workspaceId]);
+  }, [item.storagePath]);
 
+  if (failed) return <span>Unavailable</span>;
   if (!url) return <span>Loading…</span>;
   if (video) {
     return <video className={className} src={url} controls playsInline />;
@@ -361,22 +375,15 @@ export function ProgressMediaGrid({
               <VisibilityBadge item={item} />
               <VisibilityToggleButton item={item} />
               {item.type === "photo" ? (
-                <SecureStorageAsset item={item} workspaceId={workspaceId} />
+                <SecureStorageAsset item={item} />
               ) : bunny ? (
                 <BunnyThumbnail
-                  item={item}
-                  workspaceId={
-                    workspaceId || item.workspaceId || item.companyId
-                  }
+                  src={item.thumbnailUrl}
                   alt={item.title || item.fileName || "Project video"}
                 />
               ) : (
                 <>
-                  <SecureStorageAsset
-                    item={item}
-                    workspaceId={workspaceId}
-                    video
-                  />
+                  <SecureStorageAsset item={item} video />
                   <span className="site-media-tile-label">Video</span>
                 </>
               )}
@@ -427,7 +434,7 @@ export function ProgressMediaGrid({
           ) : null}
           <div className="site-lightbox-frame">
             {active.type === "photo" ? (
-              <SecureStorageAsset item={active} workspaceId={workspaceId} />
+              <SecureStorageAsset item={active} />
             ) : isBunnyVideo(active) ? (
               <div style={{ width: "min(960px, 100%)" }}>
                 <SecureBunnyPlayer
@@ -438,11 +445,7 @@ export function ProgressMediaGrid({
                 />
               </div>
             ) : (
-              <SecureStorageAsset
-                item={active}
-                workspaceId={workspaceId}
-                video
-              />
+              <SecureStorageAsset item={active} video />
             )}
             <div className="site-lightbox-meta">
               <div>
@@ -469,11 +472,7 @@ export function ProgressMediaGrid({
                     type="button"
                     onClick={async () => {
                       try {
-                        const url = await requestSecureMediaUrl(
-                          active,
-                          workspaceId,
-                        );
-                        window.open(url, "_blank", "noopener,noreferrer");
+                        await downloadStorageAsset(active);
                       } catch {
                         window.alert("Media download is unavailable.");
                       }

@@ -4,13 +4,16 @@ import { getAdminDb } from "@/lib/firebase-admin";
 import {
   EMPTY_COLLEAGUE_PERMISSIONS,
   OWNER_PERMISSIONS,
+  accessLevelToLegacyPreset,
   mergePermissions,
   permissionsForPreset,
+  resolveAccessLevel,
 } from "@/lib/permissions";
 import type {
   ColleaguePermissions,
   ColleaguePreset,
   Project,
+  ProjectAccessLevel,
   ProjectStatus,
 } from "@/lib/types";
 
@@ -23,9 +26,9 @@ import type {
  *   default to false) — this is how historical CUSTOM records resolve using
  *   their own stored permissions, and it never gets "topped up" by a named
  *   preset's broader defaults.
- * - Only when no explicit map is stored does a named preset
- *   (VIEW_ONLY / UPDATE_PROGRESS / EDITOR) resolve from the shared preset
- *   table in src/lib/permissions.ts.
+ * - Only when no explicit map is stored does a named access level / preset
+ *   (VIEWER≡VIEW_ONLY / UPDATE_PROGRESS / EDITOR) resolve from the shared
+ *   preset table in src/lib/permissions.ts.
  * - CLIENT members and the Project creator are never granted Colleague
  *   permissions this way — creator gets full OWNER_PERMISSIONS, the Client
  *   boundary is enforced separately (memberType + clientVisible).
@@ -33,6 +36,9 @@ import type {
 export function resolveEffectivePermissions(input: {
   isOwner: boolean;
   memberType: string | null;
+  /** Canonical accessLevel (preferred). */
+  accessLevel?: string | null;
+  /** Legacy permissionPreset — still read for historical members. */
   permissionPreset: string | null;
   permissions?: Record<string, unknown> | null;
 }): ColleaguePermissions | null {
@@ -42,8 +48,15 @@ export function resolveEffectivePermissions(input: {
   if (input.memberType === "CLIENT" || input.permissionPreset === "CLIENT") {
     return null;
   }
-  const preset = input.permissionPreset;
-  if (!preset) return null;
+
+  const level: ProjectAccessLevel | null =
+    resolveAccessLevel(input.accessLevel) ||
+    resolveAccessLevel(input.permissionPreset);
+  const legacyPreset =
+    (level ? accessLevelToLegacyPreset(level) : null) ||
+    input.permissionPreset;
+
+  if (!legacyPreset) return null;
   if (input.permissions) {
     return mergePermissions(
       EMPTY_COLLEAGUE_PERMISSIONS,
@@ -51,12 +64,12 @@ export function resolveEffectivePermissions(input: {
     );
   }
   if (
-    preset === "CUSTOM" ||
-    preset === "VIEW_ONLY" ||
-    preset === "UPDATE_PROGRESS" ||
-    preset === "EDITOR"
+    legacyPreset === "CUSTOM" ||
+    legacyPreset === "VIEW_ONLY" ||
+    legacyPreset === "UPDATE_PROGRESS" ||
+    legacyPreset === "EDITOR"
   ) {
-    return permissionsForPreset(preset as ColleaguePreset);
+    return permissionsForPreset(legacyPreset as ColleaguePreset);
   }
   return null;
 }
@@ -67,6 +80,7 @@ export type DirectoryProject = Project & {
   /** Active shared members (excluding the creator) — only set for owned projects. */
   sharedActiveCount?: number;
   memberType?: string | null;
+  accessLevel?: string | null;
   permissionPreset?: string | null;
   effectivePermissions?: ColleaguePermissions | null;
 };
@@ -239,6 +253,7 @@ export async function listProjectsForUser(
       ...entry.project,
       isOwner: false,
       memberType: entry.candidate.memberType,
+      accessLevel: entry.candidate.accessLevel,
       permissionPreset: entry.candidate.permissionPreset,
       effectivePermissions: entry.candidate.effectivePermissions,
     });
@@ -275,6 +290,7 @@ export type ResolvedProject = {
   isOwner: boolean;
   /** UI-hint only — servers always re-check the member doc themselves. */
   memberType: string | null;
+  accessLevel: string | null;
   permissionPreset: string | null;
   /** Normalized permission map for the caller — see resolveEffectivePermissions. */
   effectivePermissions: ColleaguePermissions | null;
@@ -282,15 +298,20 @@ export type ResolvedProject = {
 
 function memberHint(data: Record<string, unknown> | undefined) {
   const memberType = data ? String(data.memberType || "") || null : null;
+  const accessLevel = data
+    ? String(data.accessLevel || "") || null
+    : null;
   const permissionPreset = data
     ? String(data.permissionPreset || "") || null
     : null;
   return {
     memberType,
+    accessLevel,
     permissionPreset,
     effectivePermissions: resolveEffectivePermissions({
       isOwner: false,
       memberType,
+      accessLevel,
       permissionPreset,
       permissions:
         data && data.permissions && typeof data.permissions === "object"
@@ -335,6 +356,7 @@ export async function resolveProjectForUser(
           project: mapProjectDoc(hint, projectId, data),
           isOwner: true,
           memberType: "OWNER",
+          accessLevel: null,
           permissionPreset: "OWNER",
           effectivePermissions: { ...OWNER_PERMISSIONS },
         };
@@ -373,6 +395,7 @@ export async function resolveProjectForUser(
         project: mapProjectDoc(workspaceId, projectId, data),
         isOwner: true,
         memberType: "OWNER",
+        accessLevel: null,
         permissionPreset: "OWNER",
         effectivePermissions: { ...OWNER_PERMISSIONS },
       };

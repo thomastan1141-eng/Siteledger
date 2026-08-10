@@ -149,7 +149,10 @@ export function bunnyDetailsToPatch(
     width: details.width,
     height: details.height,
     storageSizeBytes: details.storageSize,
-    thumbnailUrl: null,
+    // Direct Bunny CDN thumbnail. Independent of playback/download signing —
+    // a broken thumbnail URL never blocks embed playback (BunnyThumbnail
+    // falls back to a placeholder on image load error).
+    thumbnailUrl: details.thumbnailUrl,
     thumbnailBlurhash: details.thumbnailBlurhash,
     availableResolutions: details.availableResolutions,
     errorCode: status === "FAILED" ? "BUNNY_PROCESSING_FAILED" : null,

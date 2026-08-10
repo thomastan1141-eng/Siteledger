@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebase-admin";
-import {
-  createEmbedPlayback,
-  createSignedCdnUrl,
-} from "@/lib/bunny/server";
+import { createEmbedPlayback } from "@/lib/bunny/server";
 import { authErrorResponse, verifyAuthenticatedRequest } from "@/lib/server/auth";
 import {
   assertProjectPermission,
@@ -77,22 +74,11 @@ export async function GET(
       );
     }
 
+    // Thumbnail is served directly from Firestore's `thumbnailUrl` (Bunny
+    // CDN) by the UI — independent of this playback/embed-token call, so a
+    // thumbnail problem can never block video playback.
     const playback = createEmbedPlayback(String(data.bunnyVideoId), 300);
-    let thumbnailUrl: string | null = null;
-    try {
-      const thumbnailName = String(
-        data.thumbnailFileName || "thumbnail.jpg",
-      );
-      thumbnailUrl = createSignedCdnUrl(
-        `${data.bunnyVideoId}/${thumbnailName}`,
-        300,
-      ).url;
-    } catch {
-      // CDN token auth is required for direct assets, but an absent key must
-      // not break the separately signed embed player.
-      thumbnailUrl = null;
-    }
-    return NextResponse.json({ ...playback, thumbnailUrl });
+    return NextResponse.json(playback);
   } catch (err) {
     const auth = authErrorResponse(err);
     if (auth.status === 401 || auth.status === 403) {
