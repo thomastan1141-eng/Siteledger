@@ -40,6 +40,7 @@ import {
   formatRmb,
   formatSgd,
   parseMoney,
+  roundMoney,
 } from "@/lib/money";
 import {
   canViewPrivatePurchaseCost,
@@ -92,10 +93,21 @@ type PendingPhoto = {
   previewUrl: string;
 };
 
+/** Local Add/Edit form state — unfilled numeric fields use null (empty input). */
+type PurchaseFormState = Omit<
+  PurchaseInput,
+  "quantity" | "unitPriceRMB" | "unitPriceSGD" | "unitCost"
+> & {
+  quantity: number | null;
+  unitPriceRMB: number | null;
+  unitPriceSGD: number | null;
+  unitCost: number | null;
+};
+
 function defaultForm(
   category: PurchaseCategory,
   asOwner: boolean,
-): PurchaseInput {
+): PurchaseFormState {
   return {
     category,
     itemName: "",
@@ -105,15 +117,21 @@ function defaultForm(
       category === "LIGHTING" ? emptyLightingSpecs() : undefined,
     purchaseResponsibility: asOwner ? "OWNER" : "STUDIO",
     currency: "RMB",
-    quantity: 1,
-    unitPriceRMB: 0,
-    unitPriceSGD: 0,
+    quantity: null,
+    unitPriceRMB: null,
+    unitPriceSGD: null,
     purchaseStatus: "TO_CONFIRM",
     action: "",
     photos: [],
     coverImageUrl: "",
     unitCost: null,
   };
+}
+
+function parseOptionalMoney(raw: string): number | null {
+  if (!raw.trim()) return null;
+  const n = Number(String(raw).replace(/,/g, "").trim());
+  return Number.isFinite(n) ? roundMoney(n) : null;
 }
 
 function summarizeLocations(locations: string[]) {
@@ -1684,7 +1702,7 @@ function PurchaseFormSheet({
   ) => void | Promise<void>;
 }) {
   const initialPhotos = initial?.photos || [];
-  const [form, setForm] = useState<PurchaseInput>(() =>
+  const [form, setForm] = useState<PurchaseFormState>(() =>
     initial
       ? {
           category: initial.category,
@@ -1719,11 +1737,12 @@ function PurchaseFormSheet({
   const [coverPendingId, setCoverPendingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const quantityForCalc = form.quantity ?? 0;
   const totals = calcPurchaseTotals({
     currency: form.currency,
-    quantity: form.quantity,
-    unitPriceRMB: form.unitPriceRMB,
-    unitPriceSGD: form.unitPriceSGD,
+    quantity: quantityForCalc,
+    unitPriceRMB: form.unitPriceRMB ?? 0,
+    unitPriceSGD: form.unitPriceSGD ?? 0,
     rmbToSgdRate: rate,
   });
   const isLighting = category === "LIGHTING";
@@ -1731,7 +1750,7 @@ function PurchaseFormSheet({
   const formCostTotals =
     form.unitCost != null && Number.isFinite(form.unitCost)
       ? resolvePurchaseCostTotals(
-          { quantity: form.quantity, unitCost: form.unitCost },
+          { quantity: quantityForCalc, unitCost: form.unitCost },
           rate,
         )
       : null;
@@ -1770,6 +1789,10 @@ function PurchaseFormSheet({
       const draft: PurchaseInput = {
         ...form,
         category,
+        quantity: form.quantity ?? 0,
+        unitPriceRMB: form.unitPriceRMB ?? 0,
+        unitPriceSGD: form.unitPriceSGD ?? 0,
+        unitCost: form.unitCost,
         lightingSpecifications: isLighting
           ? form.lightingSpecifications || emptyLightingSpecs()
           : undefined,
@@ -1980,11 +2003,11 @@ function PurchaseFormSheet({
                 type="number"
                 min={0}
                 step={1}
-                value={form.quantity}
+                value={form.quantity ?? ""}
                 onChange={(e) =>
                   setForm((s) => ({
                     ...s,
-                    quantity: parseMoney(e.target.value),
+                    quantity: parseOptionalMoney(e.target.value),
                   }))
                 }
               />
@@ -2009,11 +2032,11 @@ function PurchaseFormSheet({
                   type="number"
                   min={0}
                   step="any"
-                  value={form.unitPriceSGD}
+                  value={form.unitPriceSGD ?? ""}
                   onChange={(e) =>
                     setForm((s) => ({
                       ...s,
-                      unitPriceSGD: parseMoney(e.target.value),
+                      unitPriceSGD: parseOptionalMoney(e.target.value),
                     }))
                   }
                 />
@@ -2024,31 +2047,29 @@ function PurchaseFormSheet({
                   type="number"
                   min={0}
                   step="any"
-                  value={form.unitPriceRMB}
+                  value={form.unitPriceRMB ?? ""}
                   onChange={(e) =>
                     setForm((s) => ({
                       ...s,
-                      unitPriceRMB: parseMoney(e.target.value),
+                      unitPriceRMB: parseOptionalMoney(e.target.value),
                     }))
                   }
                 />
               </SiteField>
             )}
             {showPrivateCost ? (
-              <SiteField label="Cost (RMB)">
+              <SiteField label="Cost">
                 <SiteInput
                   type="number"
                   min={0}
                   step="any"
                   value={form.unitCost ?? ""}
                   onChange={(e) => {
-                    const raw = e.target.value.trim();
                     setForm((s) => ({
                       ...s,
-                      unitCost: raw === "" ? null : parseMoney(raw),
+                      unitCost: parseOptionalMoney(e.target.value),
                     }));
                   }}
-                  placeholder="Unit cost RMB"
                 />
               </SiteField>
             ) : null}
