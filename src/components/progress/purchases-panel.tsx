@@ -113,8 +113,9 @@ function defaultForm(
     itemName: "",
     description: "",
     locations: [],
-    lightingSpecifications:
-      category === "LIGHTING" ? emptyLightingSpecs() : undefined,
+    ...(category === "LIGHTING"
+      ? { lightingSpecifications: emptyLightingSpecs() }
+      : {}),
     purchaseResponsibility: asOwner ? "OWNER" : "STUDIO",
     currency: "RMB",
     quantity: null,
@@ -1709,13 +1710,14 @@ function PurchaseFormSheet({
           itemName: initial.itemName,
           description: initial.description,
           locations: [...initial.locations],
-          lightingSpecifications:
-            initial.category === "LIGHTING"
-              ? {
+          ...(initial.category === "LIGHTING"
+            ? {
+                lightingSpecifications: {
                   ...emptyLightingSpecs(),
                   ...initial.lightingSpecifications,
-                }
-              : undefined,
+                },
+              }
+            : {}),
           purchaseResponsibility: initial.purchaseResponsibility,
           currency: initial.currency,
           quantity: initial.quantity,
@@ -1793,14 +1795,17 @@ function PurchaseFormSheet({
         unitPriceRMB: form.unitPriceRMB ?? 0,
         unitPriceSGD: form.unitPriceSGD ?? 0,
         unitCost: form.unitCost,
-        lightingSpecifications: isLighting
-          ? form.lightingSpecifications || emptyLightingSpecs()
-          : undefined,
         photos: form.photos || [],
         coverImageUrl: coverPendingId
           ? form.photos?.[0]?.url || ""
           : form.coverImageUrl || form.photos?.[0]?.url || "",
       };
+      if (isLighting) {
+        draft.lightingSpecifications =
+          form.lightingSpecifications || emptyLightingSpecs();
+      } else {
+        delete draft.lightingSpecifications;
+      }
       await onSaved(draft, pending, removedIds, coverPendingId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");

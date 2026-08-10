@@ -666,17 +666,6 @@ export async function createPurchase(
     itemName: input.itemName.trim(),
     description: input.description || "",
     locations: (input.locations || []).map((l) => l.trim()).filter(Boolean),
-    lightingSpecifications:
-      category === "LIGHTING"
-        ? {
-            watt: input.lightingSpecifications?.watt?.trim() || "",
-            fittingColour:
-              input.lightingSpecifications?.fittingColour?.trim() || "",
-            colourTemperature:
-              input.lightingSpecifications?.colourTemperature?.trim() || "",
-            cutOutSize: input.lightingSpecifications?.cutOutSize?.trim() || "",
-          }
-        : undefined,
     coverImageUrl: input.coverImageUrl || photos[0]?.url || "",
     photos,
     purchaseResponsibility: input.purchaseResponsibility,
@@ -692,6 +681,21 @@ export async function createPurchase(
     updatedBy: actor.uid,
     createdAt: now,
     updatedAt: now,
+    // Lighting-only. Never write lightingSpecifications: undefined — Firestore
+    // rejects undefined field values (Kitchen / Bathroom create was failing).
+    ...(category === "LIGHTING"
+      ? {
+          lightingSpecifications: {
+            watt: input.lightingSpecifications?.watt?.trim() || "",
+            fittingColour:
+              input.lightingSpecifications?.fittingColour?.trim() || "",
+            colourTemperature:
+              input.lightingSpecifications?.colourTemperature?.trim() || "",
+            cutOutSize:
+              input.lightingSpecifications?.cutOutSize?.trim() || "",
+          },
+        }
+      : {}),
   };
 
   if (AUTH_BYPASS) {
@@ -767,27 +771,6 @@ export async function updatePurchase(
   });
   const photos = patch.photos ?? existing.photos;
   const category = patch.category ?? existing.category;
-  const lightingSpecifications =
-    category === "LIGHTING"
-      ? {
-          watt:
-            patch.lightingSpecifications?.watt ??
-            existing.lightingSpecifications?.watt ??
-            "",
-          fittingColour:
-            patch.lightingSpecifications?.fittingColour ??
-            existing.lightingSpecifications?.fittingColour ??
-            "",
-          colourTemperature:
-            patch.lightingSpecifications?.colourTemperature ??
-            existing.lightingSpecifications?.colourTemperature ??
-            "",
-          cutOutSize:
-            patch.lightingSpecifications?.cutOutSize ??
-            existing.lightingSpecifications?.cutOutSize ??
-            "",
-        }
-      : undefined;
 
   const payload = {
     category,
@@ -796,7 +779,6 @@ export async function updatePurchase(
     locations: (patch.locations ?? existing.locations)
       .map((l) => l.trim())
       .filter(Boolean),
-    lightingSpecifications,
     coverImageUrl:
       patch.coverImageUrl ??
       existing.coverImageUrl ??
@@ -815,6 +797,29 @@ export async function updatePurchase(
     action: (patch.action ?? existing.action ?? "").trim(),
     updatedBy: actor.uid,
     updatedAt: nowIso(),
+    // Lighting-only. Omit for Kitchen / Bathroom — never write undefined.
+    ...(category === "LIGHTING"
+      ? {
+          lightingSpecifications: {
+            watt:
+              patch.lightingSpecifications?.watt ??
+              existing.lightingSpecifications?.watt ??
+              "",
+            fittingColour:
+              patch.lightingSpecifications?.fittingColour ??
+              existing.lightingSpecifications?.fittingColour ??
+              "",
+            colourTemperature:
+              patch.lightingSpecifications?.colourTemperature ??
+              existing.lightingSpecifications?.colourTemperature ??
+              "",
+            cutOutSize:
+              patch.lightingSpecifications?.cutOutSize ??
+              existing.lightingSpecifications?.cutOutSize ??
+              "",
+          },
+        }
+      : {}),
   };
 
   if (AUTH_BYPASS) {
@@ -960,9 +965,11 @@ export async function duplicatePurchase(
       itemName: `${existing.itemName} (copy)`,
       description: existing.description,
       locations: [...existing.locations],
-      lightingSpecifications: existing.lightingSpecifications
-        ? { ...existing.lightingSpecifications }
-        : undefined,
+      ...(existing.category === "LIGHTING" && existing.lightingSpecifications
+        ? {
+            lightingSpecifications: { ...existing.lightingSpecifications },
+          }
+        : {}),
       coverImageUrl: existing.coverImageUrl,
       photos: existing.photos.map((p) => ({ ...p })),
       purchaseResponsibility: existing.purchaseResponsibility,
