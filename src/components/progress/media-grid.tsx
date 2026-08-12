@@ -2,9 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { getBlob, ref } from "firebase/storage";
-import { AlertTriangle, ChevronLeft, ChevronRight, Eye, EyeOff, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  X,
+} from "lucide-react";
 import { BunnyThumbnail } from "@/components/media/bunny-thumbnail";
 import { SecureBunnyPlayer } from "@/components/media/secure-bunny-player";
+import { SecureStorageImage } from "@/components/media/secure-storage-image";
 import {
   deleteBunnyMedia,
   syncBunnyMedia,
@@ -37,6 +46,10 @@ function isClientVisible(item: MediaItem) {
   );
 }
 
+function mediaLabel(item: MediaItem) {
+  return item.fileName || item.title || item.caption || item.id;
+}
+
 /**
  * Loads a Storage object straight through the authenticated Firebase Web
  * SDK. Every call re-evaluates Storage Rules against the current session —
@@ -65,16 +78,20 @@ async function downloadStorageAsset(item: MediaItem) {
 export function SecureStorageAsset({
   item,
   video = false,
+  /** Grid/cards use thumb; lightbox / full viewer use original. */
+  variant = "original",
   className,
 }: {
   item: MediaItem;
   video?: boolean;
+  variant?: "thumb" | "original";
   className?: string;
 }) {
   const [url, setUrl] = useState("");
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (!video) return;
     setFailed(false);
     setUrl("");
     if (!item.storagePath) {
@@ -99,22 +116,23 @@ export function SecureStorageAsset({
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [item.storagePath]);
+  }, [item.storagePath, video]);
+
+  if (!video) {
+    return (
+      <SecureStorageImage
+        storagePath={item.storagePath}
+        thumbnailPath={item.thumbnailPath}
+        variant={variant}
+        alt={item.caption || item.fileName}
+        className={className}
+      />
+    );
+  }
 
   if (failed) return <span>Unavailable</span>;
   if (!url) return <span>Loading…</span>;
-  if (video) {
-    return <video className={className} src={url} controls playsInline />;
-  }
-  // eslint-disable-next-line @next/next/no-img-element
-  return (
-    <img
-      className={className}
-      src={url}
-      alt={item.caption || item.fileName}
-      loading="lazy"
-    />
-  );
+  return <video className={className} src={url} controls playsInline />;
 }
 
 /** True once a Bunny video has been stuck outside PLAYABLE/READY/FAILED for 10+ minutes. */
@@ -158,6 +176,9 @@ export function ProgressMediaGrid({
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const active = activeIndex !== null ? items[activeIndex] : null;
   const [busyId, setBusyId] = useState("");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     if (activeIndex === null) return;
@@ -175,6 +196,33 @@ export function ProgressMediaGrid({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [activeIndex, items.length]);
+
+  useEffect(() => {
+    if (!selectMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") exitSelectMode();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectMode]);
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds([]);
+    setBulkBusy(false);
+  }
+
+  function enterSelectMode() {
+    setActiveIndex(null);
+    setSelectMode(true);
+    setSelectedIds([]);
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
 
   if (!items.length) {
     return (
@@ -228,17 +276,22 @@ export function ProgressMediaGrid({
     }
   }
 
-  async function toggleVisibility(item: MediaItem) {
+  async function setItemVisibility(item: MediaItem, clientVisible: boolean) {
     const ws = workspaceId || item.workspaceId || item.companyId;
-    if (!ws) return;
+    if (!ws) throw new Error("Missing workspace.");
+    await setMediaClientVisible({
+      mediaId: item.id,
+      projectId: item.projectId,
+      workspaceId: ws,
+      clientVisible,
+    });
+  }
+
+  async function applySingleVisibility(item: MediaItem, clientVisible: boolean) {
+    if (isClientVisible(item) === clientVisible) return;
     setBusyId(item.id);
     try {
-      await setMediaClientVisible({
-        mediaId: item.id,
-        projectId: item.projectId,
-        workspaceId: ws,
-        clientVisible: !isClientVisible(item),
-      });
+      await setItemVisibility(item, clientVisible);
       onChanged?.();
     } catch (err) {
       window.alert(
@@ -249,6 +302,44 @@ export function ProgressMediaGrid({
     } finally {
       setBusyId("");
     }
+  }
+
+  async function applyBulkVisibility(clientVisible: boolean) {
+    const targets = items.filter((item) => selectedIds.includes(item.id));
+    if (!targets.length) return;
+    setBulkBusy(true);
+    const failures: Array<{ id: string; label: string; error: string }> = [];
+    for (const item of targets) {
+      try {
+        if (isClientVisible(item) === clientVisible) continue;
+        await setItemVisibility(item, clientVisible);
+      } catch (err) {
+        failures.push({
+          id: item.id,
+          label: mediaLabel(item),
+          error:
+            err instanceof Error
+              ? err.message
+              : "Could not update visibility.",
+        });
+      }
+    }
+    setBulkBusy(false);
+    onChanged?.();
+    if (failures.length) {
+      const detail = failures
+        .slice(0, 5)
+        .map((f) => `• ${f.label}: ${f.error}`)
+        .join("\n");
+      const more =
+        failures.length > 5 ? `\n…and ${failures.length - 5} more` : "";
+      window.alert(
+        `${failures.length} of ${targets.length} item(s) failed:\n${detail}${more}`,
+      );
+      setSelectedIds(failures.map((f) => f.id));
+      return;
+    }
+    exitSelectMode();
   }
 
   function VisibilityBadge({ item }: { item: MediaItem }) {
@@ -262,55 +353,120 @@ export function ProgressMediaGrid({
   }
 
   function VisibilityToggleButton({ item }: { item: MediaItem }) {
-    if (!canManageVisibility) return null;
+    if (!canManageVisibility || selectMode) return null;
+    const visible = isClientVisible(item);
     return (
       <button
         type="button"
-        aria-label={isClientVisible(item) ? "Hide from client" : "Show to client"}
-        title={isClientVisible(item) ? "Hide from client" : "Show to client"}
-        disabled={busyId === item.id}
+        aria-label={visible ? "Make Internal" : "Visible to Client"}
+        title={visible ? "Make Internal" : "Visible to Client"}
+        disabled={busyId === item.id || bulkBusy}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          void toggleVisibility(item);
+          void applySingleVisibility(item, !visible);
         }}
-        style={{
-          position: "absolute",
-          top: 6,
-          right: 6,
-          zIndex: 1,
-          width: 28,
-          height: 28,
-          display: "grid",
-          placeItems: "center",
-          borderRadius: 999,
-          border: "none",
-          background: "rgba(17, 18, 17, 0.6)",
-          color: "#fff",
-          cursor: busyId === item.id ? "wait" : "pointer",
-        }}
+        className="site-media-visibility-btn"
       >
-        {isClientVisible(item) ? <Eye size={14} /> : <EyeOff size={14} />}
+        {visible ? <Eye size={14} /> : <EyeOff size={14} />}
       </button>
     );
   }
 
+  function SelectionMark({ item }: { item: MediaItem }) {
+    if (!selectMode) return null;
+    const selected = selectedIds.includes(item.id);
+    return (
+      <span
+        className="site-media-select-mark"
+        data-selected={selected ? "true" : "false"}
+        aria-hidden
+      >
+        {selected ? <Check size={14} /> : null}
+      </span>
+    );
+  }
+
+  function onTileActivate(item: MediaItem, index: number) {
+    if (selectMode) {
+      toggleSelected(item.id);
+      return;
+    }
+    setActiveIndex(index);
+  }
+
   return (
     <>
-      <div className="site-media-grid" data-size={size}>
+      {canManageVisibility ? (
+        <div className="site-media-visibility-bar">
+          {!selectMode ? (
+            <SiteButton type="button" variant="soft" onClick={enterSelectMode}>
+              Select
+            </SiteButton>
+          ) : (
+            <>
+              <span className="site-media-visibility-count">
+                {selectedIds.length} selected
+              </span>
+              <SiteButton
+                type="button"
+                variant="soft"
+                disabled={!selectedIds.length || bulkBusy}
+                onClick={() => void applyBulkVisibility(false)}
+              >
+                Make Internal
+              </SiteButton>
+              <SiteButton
+                type="button"
+                variant="soft"
+                disabled={!selectedIds.length || bulkBusy}
+                onClick={() => void applyBulkVisibility(true)}
+              >
+                Visible to Client
+              </SiteButton>
+              <SiteButton
+                type="button"
+                variant="ghost"
+                disabled={bulkBusy}
+                onClick={exitSelectMode}
+              >
+                Cancel
+              </SiteButton>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      <div
+        className="site-media-grid"
+        data-size={size}
+        data-select-mode={selectMode ? "true" : undefined}
+      >
         {items.map((item, index) => {
           const bunny = isBunnyVideo(item);
           const ready = !bunny || isBunnyReady(item);
           const failed = bunny && isBunnyFailed(item);
           const stillStuck = isStillProcessingTooLong(item);
+          const selected = selectedIds.includes(item.id);
 
           if (bunny && !ready) {
             // Non-playable Bunny videos never open the lightbox — surface
             // status and actions directly on the tile instead.
             return (
-              <div key={item.id} className="site-media-tile" style={{ cursor: "default" }}>
+              <div
+                key={item.id}
+                className="site-media-tile"
+                data-selected={selectMode && selected ? "true" : undefined}
+                style={{ cursor: selectMode ? "pointer" : "default" }}
+                onClick={
+                  selectMode
+                    ? () => toggleSelected(item.id)
+                    : undefined
+                }
+              >
                 <VisibilityBadge item={item} />
                 <VisibilityToggleButton item={item} />
+                <SelectionMark item={item} />
                 <div
                   style={{
                     width: "100%",
@@ -333,30 +489,48 @@ export function ProgressMediaGrid({
                         ? "Still processing"
                         : processingLabel(item)}
                   </span>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-                    {failed || stillStuck ? (
-                      <SiteButton
-                        type="button"
-                        variant="soft"
-                        disabled={busyId === item.id}
-                        onClick={() => void retryStatus(item)}
-                        style={{ minHeight: 28, padding: "0 10px", fontSize: 12 }}
-                      >
-                        Check status
-                      </SiteButton>
-                    ) : null}
-                    {failed && canDelete ? (
-                      <SiteButton
-                        type="button"
-                        variant="ghost"
-                        disabled={busyId === item.id}
-                        onClick={() => void removeVideo(item)}
-                        style={{ minHeight: 28, padding: "0 10px", fontSize: 12, color: "#fff" }}
-                      >
-                        Remove
-                      </SiteButton>
-                    ) : null}
-                  </div>
+                  {!selectMode ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        flexWrap: "wrap",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {failed || stillStuck ? (
+                        <SiteButton
+                          type="button"
+                          variant="soft"
+                          disabled={busyId === item.id}
+                          onClick={() => void retryStatus(item)}
+                          style={{
+                            minHeight: 28,
+                            padding: "0 10px",
+                            fontSize: 12,
+                          }}
+                        >
+                          Check status
+                        </SiteButton>
+                      ) : null}
+                      {failed && canDelete ? (
+                        <SiteButton
+                          type="button"
+                          variant="ghost"
+                          disabled={busyId === item.id}
+                          onClick={() => void removeVideo(item)}
+                          style={{
+                            minHeight: 28,
+                            padding: "0 10px",
+                            fontSize: 12,
+                            color: "#fff",
+                          }}
+                        >
+                          Remove
+                        </SiteButton>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 <span className="site-media-tile-label">
                   {formatDate(item.date)}
@@ -366,16 +540,25 @@ export function ProgressMediaGrid({
           }
 
           return (
-            <button
+            <div
               key={item.id}
-              type="button"
               className="site-media-tile"
-              onClick={() => setActiveIndex(index)}
+              role="button"
+              tabIndex={0}
+              data-selected={selectMode && selected ? "true" : undefined}
+              onClick={() => onTileActivate(item, index)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onTileActivate(item, index);
+                }
+              }}
             >
               <VisibilityBadge item={item} />
               <VisibilityToggleButton item={item} />
+              <SelectionMark item={item} />
               {item.type === "photo" ? (
-                <SecureStorageAsset item={item} />
+                <SecureStorageAsset item={item} variant="thumb" />
               ) : bunny ? (
                 <BunnyThumbnail
                   src={item.thumbnailUrl}
@@ -396,12 +579,12 @@ export function ProgressMediaGrid({
                       item.workItems[0] ? ` · ${item.workItems[0]}` : ""
                     }`}
               </span>
-            </button>
+            </div>
           );
         })}
       </div>
 
-      {active && activeIndex !== null ? (
+      {active && activeIndex !== null && !selectMode ? (
         <div className="site-lightbox">
           <button
             type="button"
@@ -434,7 +617,7 @@ export function ProgressMediaGrid({
           ) : null}
           <div className="site-lightbox-frame">
             {active.type === "photo" ? (
-              <SecureStorageAsset item={active} />
+              <SecureStorageAsset item={active} variant="original" />
             ) : isBunnyVideo(active) ? (
               <div style={{ width: "min(960px, 100%)" }}>
                 <SecureBunnyPlayer
@@ -461,7 +644,7 @@ export function ProgressMediaGrid({
                   ? ` · ${Math.round(active.durationSeconds)}s`
                   : ""}
                 {" · "}
-                {isClientVisible(active) ? "Client visible" : "Internal"}
+                {isClientVisible(active) ? "Visible to client" : "Internal"}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {allowDownload &&
@@ -482,16 +665,25 @@ export function ProgressMediaGrid({
                   </SiteButton>
                 ) : null}
                 {canManageVisibility ? (
-                  <SiteButton
-                    type="button"
-                    variant="soft"
-                    disabled={busyId === active.id}
-                    onClick={() => void toggleVisibility(active)}
-                  >
-                    {isClientVisible(active)
-                      ? "Hide from client"
-                      : "Show to client"}
-                  </SiteButton>
+                  isClientVisible(active) ? (
+                    <SiteButton
+                      type="button"
+                      variant="soft"
+                      disabled={busyId === active.id}
+                      onClick={() => void applySingleVisibility(active, false)}
+                    >
+                      Make Internal
+                    </SiteButton>
+                  ) : (
+                    <SiteButton
+                      type="button"
+                      variant="soft"
+                      disabled={busyId === active.id}
+                      onClick={() => void applySingleVisibility(active, true)}
+                    >
+                      Visible to Client
+                    </SiteButton>
+                  )
                 ) : null}
                 {canDelete && isBunnyVideo(active) ? (
                   <SiteButton

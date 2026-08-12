@@ -24,10 +24,16 @@ export function ProgressTimeline({
   groups,
   mediaByUpdate,
   allowDownload = false,
+  workspaceId,
+  canManageVisibility = false,
+  onMediaChanged,
 }: {
   groups: Array<{ date: string; items: DailyUpdate[] }>;
   mediaByUpdate: Record<string, MediaItem[]>;
   allowDownload?: boolean;
+  workspaceId?: string;
+  canManageVisibility?: boolean;
+  onMediaChanged?: () => void;
 }) {
   const [photoSize, setPhotoSize] = useState<MediaGridSize>(() =>
     readStoredPhotoSize(),
@@ -113,6 +119,9 @@ export function ProgressTimeline({
               <ProgressMediaGrid
                 items={media}
                 allowDownload={allowDownload}
+                workspaceId={workspaceId}
+                canManageVisibility={canManageVisibility}
+                onChanged={onMediaChanged}
                 size={photoSize}
               />
             </div>

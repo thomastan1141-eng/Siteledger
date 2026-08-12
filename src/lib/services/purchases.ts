@@ -15,18 +15,23 @@ import {
   deleteObject,
   getDownloadURL,
   ref,
+  uploadBytes,
   uploadBytesResumable,
 } from "firebase/storage";
 import { getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { AUTH_BYPASS } from "../demo";
 import { COMPANY_ID } from "../constants";
-import { compressImageFile } from "../image-compress";
+import {
+  compressImageFile,
+  createImageThumbnail,
+} from "../image-compress";
 import { calcPurchaseTotals, roundMoney } from "../money";
 import {
   purchasePrivateCostPath,
   purchasesPath,
   requireTenantId,
   storagePurchasePhotoPath,
+  thumbnailStoragePath,
 } from "../paths";
 import type {
   LightingSpecifications,
@@ -917,6 +922,13 @@ export async function deletePurchase(
           } catch {
             /* ignore */
           }
+          if (p.thumbnailPath) {
+            try {
+              await deleteObject(ref(getFirebaseStorage(), p.thumbnailPath));
+            } catch {
+              /* ignore */
+            }
+          }
         }),
     );
     await deletePrivateCost(projectId, purchaseId, ws);
@@ -1053,10 +1065,32 @@ export async function uploadPurchasePhotos(
         () => resolve(),
       );
     });
+    let thumbnailPath: string | undefined;
+    try {
+      const thumb = await createImageThumbnail(file);
+      if (thumb) {
+        const thumbPath = thumbnailStoragePath(path);
+        await uploadBytes(ref(getFirebaseStorage(), thumbPath), thumb, {
+          contentType: "image/jpeg",
+          customMetadata: {
+            kind: "thumbnail",
+            uploadedBy: actor.uid,
+            purchaseId,
+            projectId,
+            workspaceId: ws,
+          },
+        });
+        thumbnailPath = thumbPath;
+      }
+    } catch {
+      thumbnailPath = undefined;
+    }
+
     uploaded.push({
       id: `pp-${Date.now()}-${i}`,
       url: await getDownloadURL(storageRef),
       storagePath: path,
+      ...(thumbnailPath ? { thumbnailPath } : {}),
       fileName: file.name,
       sizeBytes: file.size,
     });
@@ -1101,6 +1135,13 @@ export async function removePurchasePhoto(
       await deleteObject(ref(getFirebaseStorage(), target.storagePath));
     } catch {
       /* ignore */
+    }
+    if (target.thumbnailPath) {
+      try {
+        await deleteObject(ref(getFirebaseStorage(), target.thumbnailPath));
+      } catch {
+        /* ignore */
+      }
     }
   }
   const coverImageUrl =

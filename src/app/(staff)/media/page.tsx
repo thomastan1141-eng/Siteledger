@@ -10,14 +10,14 @@ import {
 import { BunnyVideoUploader } from "@/components/media/bunny-video-uploader";
 import { ProgressMediaGrid } from "@/components/progress/media-grid";
 import { useAuth } from "@/lib/auth-context";
-import { fetchMyProjects } from "@/lib/services/projects";
+import { fetchMyProjects, type MyProject } from "@/lib/services/projects";
 import { listMedia } from "@/lib/services/media";
-import type { MediaItem, Project } from "@/lib/types";
+import type { MediaItem } from "@/lib/types";
 import { getProjectDisplayName } from "@/lib/utils";
 
 export default function MediaLibraryPage() {
   const { profile } = useAuth();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<MyProject[]>([]);
   const [projectId, setProjectId] = useState("");
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [filter, setFilter] = useState("all");
@@ -37,6 +37,11 @@ export default function MediaLibraryPage() {
       !isCreator &&
       selectedProject.clientUserIds?.includes(profile.uid),
   );
+  const canManageMediaVisibility =
+    Boolean(selectedProject?.isOwner) ||
+    (!isClientMember &&
+      Boolean(selectedProject?.allowStaffPublish) &&
+      selectedProject?.effectivePermissions?.publishMediaToClient === true);
 
   function reloadMedia() {
     if (!projectId || !projectWorkspaceId) return;
@@ -138,6 +143,7 @@ export default function MediaLibraryPage() {
         allowDownload
         workspaceId={projectWorkspaceId}
         canDelete={isCreator}
+        canManageVisibility={canManageMediaVisibility}
         onChanged={reloadMedia}
       />
 

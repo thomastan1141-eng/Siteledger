@@ -400,7 +400,13 @@ export interface MediaItem {
   provider?: MediaProvider;
   storagePath: string;
   downloadUrl: string;
+  /** Bunny CDN poster — not used for Firebase photos. */
   thumbnailUrl?: string;
+  /**
+   * Optional Firebase Storage path for a small grid JPEG.
+   * Absent on historical photos — UI falls back to storagePath.
+   */
+  thumbnailPath?: string;
   thumbnailBlurhash?: string | null;
   fileName: string;
   contentType: string;
@@ -516,6 +522,8 @@ export interface PurchasePhoto {
   id: string;
   url: string;
   storagePath: string;
+  /** Optional Firebase Storage path for a small grid JPEG. */
+  thumbnailPath?: string;
   fileName: string;
   sizeBytes: number;
 }

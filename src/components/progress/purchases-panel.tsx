@@ -25,6 +25,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { SecureStorageImage } from "@/components/media/secure-storage-image";
 import {
   SiteButton,
   SiteField,
@@ -144,6 +145,35 @@ function summarizeLocations(locations: string[]) {
     preview: `${locations[0]} / ${locations[1]}`,
     extra: locations.length - 2,
   };
+}
+
+function resolveCoverPhoto(item: PurchaseItem): PurchasePhoto | null {
+  if (!item.photos?.length) return null;
+  return (
+    item.photos.find((p) => p.url && p.url === item.coverImageUrl) ||
+    item.photos[0] ||
+    null
+  );
+}
+
+/** Table/card cover — thumbnail via getBlob, legacy URL fallback. */
+function PurchaseCoverThumb({ item }: { item: PurchaseItem }) {
+  const cover = resolveCoverPhoto(item);
+  if (cover?.storagePath && cover.storagePath !== "demo") {
+    return (
+      <SecureStorageImage
+        storagePath={cover.storagePath}
+        thumbnailPath={cover.thumbnailPath}
+        variant="thumb"
+        alt=""
+      />
+    );
+  }
+  if (item.coverImageUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={item.coverImageUrl} alt="" />;
+  }
+  return <span>No photo</span>;
 }
 
 export function PurchasesPanel({
@@ -554,12 +584,7 @@ export function PurchasesPanel({
                   className="site-purchase-card-photo"
                   onClick={() => setGallery(item)}
                 >
-                  {item.coverImageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={item.coverImageUrl} alt="" />
-                  ) : (
-                    <span>No photo</span>
-                  )}
+                  <PurchaseCoverThumb item={item} />
                 </button>
                 <div className="site-purchase-card-body">
                   <strong>{item.itemName}</strong>
@@ -1131,12 +1156,7 @@ function PurchaseRow({
           className="site-purchase-thumb"
           onClick={onGallery}
         >
-          {item.coverImageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.coverImageUrl} alt="" />
-          ) : (
-            <span>No photo</span>
-          )}
+          <PurchaseCoverThumb item={item} />
         </button>
       </td>
       <td>
@@ -1583,6 +1603,8 @@ function PhotoField({
             <PhotoThumb
               key={photo.id}
               url={photo.url}
+              storagePath={photo.storagePath}
+              thumbnailPath={photo.thumbnailPath}
               isCover={coverImageUrl === photo.url}
               onCover={() => onCoverChange(photo.url, null)}
               onRemove={() => {
@@ -1623,6 +1645,8 @@ function PhotoField({
 
 function PhotoThumb({
   url,
+  storagePath,
+  thumbnailPath,
   isCover,
   pending,
   onCover,
@@ -1633,6 +1657,8 @@ function PhotoThumb({
   canRight,
 }: {
   url: string;
+  storagePath?: string;
+  thumbnailPath?: string;
   isCover: boolean;
   pending?: boolean;
   onCover: () => void;
@@ -1648,8 +1674,17 @@ function PhotoThumb({
       data-cover={isCover}
       data-pending={pending ? "true" : "false"}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt="" />
+      {storagePath && storagePath !== "demo" ? (
+        <SecureStorageImage
+          storagePath={storagePath}
+          thumbnailPath={thumbnailPath}
+          variant="thumb"
+          alt=""
+        />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" />
+      )}
       <div className="site-purchase-photo-thumb-actions">
         <button type="button" onClick={onCover} disabled={isCover}>
           {isCover ? "Cover" : "Set cover"}
@@ -2185,12 +2220,22 @@ function PurchaseGallery({
         <div className="site-sheet-body">
           {photos.length ? (
             <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={photos[index]?.url}
-                alt=""
-                className="site-purchase-gallery-main"
-              />
+              {photos[index]?.storagePath &&
+              photos[index].storagePath !== "demo" ? (
+                <SecureStorageImage
+                  storagePath={photos[index].storagePath}
+                  variant="original"
+                  alt=""
+                  className="site-purchase-gallery-main"
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={photos[index]?.url}
+                  alt=""
+                  className="site-purchase-gallery-main"
+                />
+              )}
               <div className="site-purchase-gallery-thumbs">
                 {photos.map((p, i) => (
                   <button
@@ -2199,8 +2244,17 @@ function PurchaseGallery({
                     data-active={i === index}
                     onClick={() => setIndex(i)}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.url} alt="" />
+                    {p.storagePath && p.storagePath !== "demo" ? (
+                      <SecureStorageImage
+                        storagePath={p.storagePath}
+                        thumbnailPath={p.thumbnailPath}
+                        variant="thumb"
+                        alt=""
+                      />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.url} alt="" />
+                    )}
                   </button>
                 ))}
               </div>

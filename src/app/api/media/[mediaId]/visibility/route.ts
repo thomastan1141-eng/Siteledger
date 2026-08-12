@@ -67,21 +67,35 @@ export async function PATCH(
 
     const storagePath =
       data.provider !== "BUNNY_STREAM" ? String(data.storagePath || "") : "";
+    const thumbnailPath =
+      data.provider !== "BUNNY_STREAM"
+        ? String(data.thumbnailPath || "")
+        : "";
     const syncStorageVisibility = async () => {
-      if (!storagePath) return;
-      const file = getStorage().bucket().file(storagePath);
-      const [metadata] = await file.getMetadata();
-      const existing = (metadata.metadata || {}) as Record<string, string>;
-      await file.setMetadata({
-        metadata: {
-          ...existing,
-          mediaId: existing.mediaId || mediaId,
-          clientVisible: body.clientVisible ? "true" : "false",
-          uploadedBy: existing.uploadedBy || String(data.uploadedBy || ""),
-          projectId: existing.projectId || projectId,
-          workspaceId: existing.workspaceId || ctx.workspaceId,
-        },
-      });
+      const paths = [storagePath, thumbnailPath].filter(Boolean);
+      for (const path of paths) {
+        try {
+          const file = getStorage().bucket().file(path);
+          const [exists] = await file.exists();
+          if (!exists) continue;
+          const [metadata] = await file.getMetadata();
+          const existing = (metadata.metadata || {}) as Record<string, string>;
+          await file.setMetadata({
+            metadata: {
+              ...existing,
+              mediaId: existing.mediaId || mediaId,
+              clientVisible: body.clientVisible ? "true" : "false",
+              uploadedBy: existing.uploadedBy || String(data.uploadedBy || ""),
+              projectId: existing.projectId || projectId,
+              workspaceId: existing.workspaceId || ctx.workspaceId,
+            },
+          });
+        } catch (err) {
+          // Original must sync; optional thumbnail may be absent on legacy rows.
+          if (path === storagePath) throw err;
+          console.warn("[media/visibility] thumbnail metadata skip", path, err);
+        }
+      }
     };
 
     // Hiding is storage-first (fail closed). Publishing is Firestore-first,

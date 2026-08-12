@@ -11,12 +11,19 @@ import {
 } from "firebase/firestore";
 import {
   ref,
+  uploadBytes,
   uploadBytesResumable,
   type UploadTaskSnapshot,
 } from "firebase/storage";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "../firebase";
 import { AUTH_BYPASS, DEMO_MEDIA } from "../demo";
-import { mediaPath, requireTenantId, storageMediaPath } from "../paths";
+import { createImageThumbnail } from "../image-compress";
+import {
+  mediaPath,
+  requireTenantId,
+  storageMediaPath,
+  thumbnailStoragePath,
+} from "../paths";
 import { sanitizeForFirestore } from "../sanitize";
 import { isImageFile, isVideoFile, todayKey } from "../utils";
 import type { MediaItem, MediaType, MediaVisibility } from "../types";
@@ -98,8 +105,37 @@ export async function uploadMediaFile(
     );
   });
 
+  // Best-effort grid thumbnail — never fail the original upload.
+  // Metadata must satisfy mediaUploadMetadataValid (same keys as original).
+  let thumbnailPath: string | undefined;
+  try {
+    const thumb = await createImageThumbnail(file);
+    if (thumb) {
+      const thumbPath = thumbnailStoragePath(path);
+      const clientVisible =
+        options.visibility === "client_visible" ||
+        options.visibility === "handover"
+          ? "true"
+          : "false";
+      await uploadBytes(ref(getFirebaseStorage(), thumbPath), thumb, {
+        contentType: "image/jpeg",
+        customMetadata: {
+          mediaId: options.mediaId,
+          clientVisible,
+          uploadedBy: options.uploadedBy,
+          projectId,
+          workspaceId: tenant,
+        },
+      });
+      thumbnailPath = thumbPath;
+    }
+  } catch {
+    thumbnailPath = undefined;
+  }
+
   return {
     storagePath: path,
+    ...(thumbnailPath ? { thumbnailPath } : {}),
     // Photos are displayed via Storage Web SDK getBlob(storagePath) under
     // Storage Rules — never persist a permanent Firebase download-token URL.
     downloadUrl: "",

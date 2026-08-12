@@ -137,6 +137,18 @@ export function storagePurchasePhotoPath(
   return `companies/${companyId}/projects/${projectId}/purchases/${purchaseId}/photos/${fileName}`;
 }
 
+/**
+ * Thumbnail object beside the original: `photo.jpg` → `photo_thumb.jpg`.
+ * Does not alter the original storagePath.
+ */
+export function thumbnailStoragePath(originalPath: string): string {
+  const slash = originalPath.lastIndexOf("/");
+  const dir = slash >= 0 ? originalPath.slice(0, slash + 1) : "";
+  const name = slash >= 0 ? originalPath.slice(slash + 1) : originalPath;
+  const base = name.replace(/\.[^.]+$/, "") || name;
+  return `${dir}${base}_thumb.jpg`;
+}
+
 export function storage3dPath(
   projectId: string,
   fileName: string,

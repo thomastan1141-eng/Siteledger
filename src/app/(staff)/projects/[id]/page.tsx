@@ -570,6 +570,9 @@ export default function ProjectDetailsPage() {
             groups={groupUpdatesByDate(updates)}
             mediaByUpdate={mediaByUpdate}
             allowDownload
+            workspaceId={project.workspaceId}
+            canManageVisibility={canManageMediaVisibility}
+            onMediaChanged={() => void reload()}
           />
         </>
       ) : null}

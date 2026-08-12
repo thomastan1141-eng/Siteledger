@@ -222,6 +222,9 @@ export async function publishDailyUpdate(input: PublishUpdateInput) {
         provider: "FIREBASE_STORAGE",
         workspaceId,
         storagePath: uploaded.storagePath,
+        ...(uploaded.thumbnailPath
+          ? { thumbnailPath: uploaded.thumbnailPath }
+          : {}),
         downloadUrl: uploaded.downloadUrl,
         fileName: uploaded.fileName,
         contentType: uploaded.contentType,
