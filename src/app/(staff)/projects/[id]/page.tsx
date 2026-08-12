@@ -16,6 +16,7 @@ import {
   ProgressMediaGrid,
   type MediaGridSize,
 } from "@/components/progress/media-grid";
+import { MediaPaginationBar } from "@/components/progress/media-pagination-bar";
 import { ProgressTimeline } from "@/components/progress/timeline";
 import { JournalComposer } from "@/components/progress/journal-composer";
 import { ManageStagesDialog } from "@/components/progress/manage-stages";
@@ -38,14 +39,22 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { usePageWidth } from "@/lib/page-width";
 import { getFirebaseAuth } from "@/lib/firebase";
+import { useMediaPage } from "@/lib/hooks/use-media-page";
 import {
   fetchProjectResolve,
   markProjectCompleted,
   updateProject,
 } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
-import { groupUpdatesByDate, groupClientJourneyByDate, groupMediaByDate, listUpdates } from "@/lib/services/updates";
-import { listMedia } from "@/lib/services/media";
+import {
+  groupJournalMediaPage,
+  listUpdates,
+} from "@/lib/services/updates";
+import {
+  countMediaPages,
+  invalidateMediaPageCache,
+  listLatestMedia,
+} from "@/lib/services/media-pagination";
 import type {
   ColleaguePermissions,
   DailyUpdate,
@@ -99,7 +108,9 @@ export default function ProjectDetailsPage() {
   });
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [updates, setUpdates] = useState<DailyUpdate[]>([]);
-  const [media, setMedia] = useState<MediaItem[]>([]);
+  const [overviewMedia, setOverviewMedia] = useState<MediaItem[]>([]);
+  const [photoCount, setPhotoCount] = useState(0);
+  const [videoCount, setVideoCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const initialTab = searchParams.get("tab");
@@ -110,10 +121,15 @@ export default function ProjectDetailsPage() {
       ? initialTab
       : "overview",
   );
+  const pageFromUrl = (() => {
+    const n = Number(searchParams.get("page") || "1");
+    if (!Number.isFinite(n) || n < 1) return 1;
+    return Math.floor(n);
+  })();
   // Overview tab embeds the 12-week timeline + monthly calendar, so it gets
   // the "wide" section width; other tabs (journal/media/settings) stay normal.
   usePageWidth(tab === "overview" ? "wide" : "normal");
-  const [mediaTab, setMediaTab] = useState<"photos" | "videos">("photos");
+  const [mediaTab, setMediaTab] = useState<"photos" | "videos" | "all">("all");
   const [photoSize, setPhotoSize] = useState<MediaGridSize>(() =>
     readStoredMediaSize(MEDIA_PHOTO_SIZE_KEY),
   );
@@ -182,30 +198,58 @@ export default function ProjectDetailsPage() {
       if (!ws || !p) {
         setSchedule([]);
         setUpdates([]);
-        setMedia([]);
+        setOverviewMedia([]);
+        setPhotoCount(0);
+        setVideoCount(0);
         return;
       }
+      const clientOnlyReload = memberType === "CLIENT";
       try {
-        const [s, u, m] = await Promise.all([
-          listSchedule(id, { workspaceId: ws, clientOnly }),
-          listUpdates(id, { workspaceId: ws, clientOnly }),
-          listMedia(id, { workspaceId: ws, clientOnly }),
+        const [s, u, latest, photos, videos] = await Promise.all([
+          listSchedule(id, { workspaceId: ws, clientOnly: clientOnlyReload }),
+          listUpdates(id, { workspaceId: ws, clientOnly: clientOnlyReload }),
+          listLatestMedia(
+            {
+              projectId: id,
+              workspaceId: ws,
+              clientOnly: clientOnlyReload,
+            },
+            8,
+          ),
+          countMediaPages({
+            projectId: id,
+            workspaceId: ws,
+            clientOnly: clientOnlyReload,
+            type: "photo",
+          }),
+          countMediaPages({
+            projectId: id,
+            workspaceId: ws,
+            clientOnly: clientOnlyReload,
+            type: "video",
+          }),
         ]);
         setSchedule(s);
         setUpdates(u);
-        setMedia(m);
+        setOverviewMedia(latest);
+        setPhotoCount(photos.totalCount);
+        setVideoCount(videos.totalCount);
       } catch (subErr) {
         console.error("[project subcollection reload]", subErr);
         setSchedule([]);
         setUpdates([]);
-        setMedia([]);
+        setOverviewMedia([]);
+        setPhotoCount(0);
+        setVideoCount(0);
       }
     } catch (err) {
       console.error("[project reload]", err);
       setProject(null);
       setSchedule([]);
       setUpdates([]);
-      setMedia([]);
+      setOverviewMedia([]);
+      setPhotoCount(0);
+      setVideoCount(0);
     }
   }
 
@@ -219,34 +263,92 @@ export default function ProjectDetailsPage() {
 
   const summary = useMemo(() => summarizeSchedule(schedule), [schedule]);
   const isClientMember = access.memberType === "CLIENT";
-  const mediaByUpdate = useMemo(() => {
-    const map: Record<string, MediaItem[]> = {};
-    media.forEach((item) => {
-      if (!item.updateId) return;
-      map[item.updateId] = map[item.updateId] || [];
-      map[item.updateId].push(item);
+  const projectWs = project?.workspaceId || project?.companyId || "";
+  const mediaTypeFilter =
+    mediaTab === "photos" ? "photo" : mediaTab === "videos" ? "video" : undefined;
+
+  const journalFilters = useMemo(() => {
+    if (!project?.id || !projectWs) return null;
+    return {
+      projectId: project.id,
+      workspaceId: projectWs,
+      clientOnly: isClientMember,
+    };
+  }, [project?.id, projectWs, isClientMember]);
+
+  const mediaFilters = useMemo(() => {
+    if (!project?.id || !projectWs) return null;
+    return {
+      projectId: project.id,
+      workspaceId: projectWs,
+      clientOnly: isClientMember,
+      type: mediaTypeFilter as "photo" | "video" | undefined,
+    };
+  }, [project?.id, projectWs, isClientMember, mediaTypeFilter]);
+
+  const journalPager = useMediaPage({
+    enabled: tab === "journal" && Boolean(journalFilters),
+    surface: "Journal",
+    filters: journalFilters,
+    page: pageFromUrl,
+    onPageClamp: (resolved) =>
+      replaceProjectQuery({ page: resolved <= 1 ? null : resolved }),
+  });
+  const mediaPager = useMediaPage({
+    enabled: tab === "media" && Boolean(mediaFilters),
+    surface: "Media",
+    filters: mediaFilters,
+    page: pageFromUrl,
+    onPageClamp: (resolved) =>
+      replaceProjectQuery({ page: resolved <= 1 ? null : resolved }),
+  });
+
+  const journalPageView = useMemo(
+    () => groupJournalMediaPage(journalPager.items, updates),
+    [journalPager.items, updates],
+  );
+
+  function replaceProjectQuery(patch: {
+    tab?: ProjectTabKey;
+    page?: number | null;
+  }) {
+    const params = new URLSearchParams(searchParams.toString());
+    const nextTab = patch.tab ?? tab;
+    if (nextTab === "overview") params.delete("tab");
+    else params.set("tab", nextTab);
+    if (patch.page === null || patch.page === undefined || patch.page <= 1) {
+      params.delete("page");
+    } else {
+      params.set("page", String(patch.page));
+    }
+    const qs = params.toString();
+    router.replace(qs ? `/projects/${id}?${qs}` : `/projects/${id}`, {
+      scroll: false,
     });
-    return map;
-  }, [media]);
-  const journeyGroups = useMemo(
-    () =>
-      isClientMember
-        ? groupClientJourneyByDate(updates, media)
-        : groupUpdatesByDate(updates),
-    [updates, media, isClientMember],
-  );
-  const mediaByDate = useMemo(
-    () => (isClientMember ? groupMediaByDate(media) : undefined),
-    [media, isClientMember],
-  );
-  const photoMedia = useMemo(
-    () => media.filter((item) => item.type === "photo"),
-    [media],
-  );
-  const videoMedia = useMemo(
-    () => media.filter((item) => item.type === "video"),
-    [media],
-  );
+  }
+
+  function changeTab(next: ProjectTabKey) {
+    if (next === "purchases") {
+      router.push(`/projects/${id}/purchases`);
+      return;
+    }
+    setTab(next);
+    replaceProjectQuery({ tab: next, page: null });
+  }
+
+  function onMediaMutated() {
+    invalidateMediaPageCache(id);
+    void reload();
+    if (tab === "journal") void journalPager.reload({ bypassCache: true });
+    if (tab === "media") void mediaPager.reload({ bypassCache: true });
+  }
+
+  // Keep local tab in sync when URL changes (back/forward).
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "journal" || t === "media" || t === "settings") setTab(t);
+    else if (!t) setTab("overview");
+  }, [searchParams]);
 
   // Only the creator (or a colleague whose effectivePermissions grant
   // editProjectDetails — i.e. the EDITOR preset) may edit Project settings.
@@ -316,13 +418,7 @@ export default function ProjectDetailsPage() {
         activeTab={tab}
         hiddenTabs={clientHiddenTabs.length ? clientHiddenTabs : undefined}
         tabLabels={isClientMember ? { journal: "Journey" } : undefined}
-        onTabChange={(next) => {
-          if (next === "purchases") {
-            router.push(`/projects/${project.id}/purchases`);
-            return;
-          }
-          setTab(next);
-        }}
+        onTabChange={changeTab}
         actions={
           <ProjectChromeActions
             projectId={project.id}
@@ -547,19 +643,19 @@ export default function ProjectDetailsPage() {
               <SiteButton
                 type="button"
                 variant="ghost"
-                onClick={() => setTab("journal")}
+                onClick={() => changeTab("journal")}
               >
                 Open journal
               </SiteButton>
             }
           >
             <ProgressMediaGrid
-              items={media.slice(0, 8)}
+              items={overviewMedia}
               allowDownload
               workspaceId={project.workspaceId}
               canDelete={canDeleteAllMedia}
               canManageVisibility={canManageMediaVisibility}
-              onChanged={() => void reload()}
+              onChanged={onMediaMutated}
             />
           </SiteSection>
 
@@ -574,24 +670,45 @@ export default function ProjectDetailsPage() {
               compact
               canPublishToClient={canManageMediaVisibility}
               onPublished={async () => {
-                await reload();
+                onMediaMutated();
               }}
             />
           ) : null}
-          <ProgressTimeline
-            groups={journeyGroups}
-            mediaByUpdate={mediaByUpdate}
-            mediaByDate={mediaByDate}
-            allowDownload
-            workspaceId={project.workspaceId}
-            canDelete={canDeleteAllMedia}
-            canManageVisibility={canManageMediaVisibility}
-            onMediaChanged={() => void reload()}
-            emptyTitle={isClientMember ? "Journey is empty" : "Journal is empty"}
-            emptyDescription={
-              isClientMember
-                ? "Client-visible photos and site updates will appear here by day."
-                : "Client-visible site updates will form the project story here."
+          {journalPager.loading && !journalPager.items.length ? (
+            <SiteSpinner />
+          ) : null}
+          {journalPager.error ? (
+            <p style={{ color: "var(--site-text-secondary)" }}>
+              {journalPager.error}
+            </p>
+          ) : null}
+          {!journalPager.loading || journalPager.items.length ? (
+            <ProgressTimeline
+              groups={journalPageView.groups}
+              mediaByUpdate={{}}
+              mediaByDate={journalPageView.mediaByDate}
+              allowDownload
+              workspaceId={project.workspaceId}
+              canDelete={canDeleteAllMedia}
+              canManageVisibility={canManageMediaVisibility}
+              onMediaChanged={onMediaMutated}
+              emptyTitle={
+                isClientMember ? "Journey is empty" : "Journal is empty"
+              }
+              emptyDescription={
+                isClientMember
+                  ? "Client-visible photos and site updates will appear here by day."
+                  : "Site updates and media will form the project story here."
+              }
+            />
+          ) : null}
+          <MediaPaginationBar
+            page={pageFromUrl}
+            totalPages={journalPager.totalPages}
+            totalCount={journalPager.totalCount}
+            busy={journalPager.loading}
+            onPageChange={(next) =>
+              replaceProjectQuery({ page: next <= 1 ? null : next })
             }
           />
         </>
@@ -603,7 +720,7 @@ export default function ProjectDetailsPage() {
             <SimpleMediaUploader
               projectId={project.id}
               workspaceId={project.workspaceId}
-              onUploaded={() => void reload()}
+              onUploaded={onMediaMutated}
             />
           ) : null}
 
@@ -611,18 +728,35 @@ export default function ProjectDetailsPage() {
             <button
               type="button"
               className="site-chip"
-              data-active={mediaTab === "photos"}
-              onClick={() => setMediaTab("photos")}
+              data-active={mediaTab === "all"}
+              onClick={() => {
+                setMediaTab("all");
+                replaceProjectQuery({ page: null });
+              }}
             >
-              Photos ({photoMedia.length})
+              All ({photoCount + videoCount})
+            </button>
+            <button
+              type="button"
+              className="site-chip"
+              data-active={mediaTab === "photos"}
+              onClick={() => {
+                setMediaTab("photos");
+                replaceProjectQuery({ page: null });
+              }}
+            >
+              Photos ({photoCount})
             </button>
             <button
               type="button"
               className="site-chip"
               data-active={mediaTab === "videos"}
-              onClick={() => setMediaTab("videos")}
+              onClick={() => {
+                setMediaTab("videos");
+                replaceProjectQuery({ page: null });
+              }}
             >
-              Videos ({videoMedia.length})
+              Videos ({videoCount})
             </button>
           </div>
 
@@ -637,9 +771,11 @@ export default function ProjectDetailsPage() {
                 key={s}
                 type="button"
                 className="site-chip"
-                data-active={(mediaTab === "photos" ? photoSize : videoSize) === s}
+                data-active={
+                  (mediaTab === "videos" ? videoSize : photoSize) === s
+                }
                 onClick={() =>
-                  mediaTab === "photos" ? setPhotoSize(s) : setVideoSize(s)
+                  mediaTab === "videos" ? setVideoSize(s) : setPhotoSize(s)
                 }
               >
                 {MEDIA_SIZE_LABELS[s]}
@@ -647,14 +783,33 @@ export default function ProjectDetailsPage() {
             ))}
           </div>
 
+          {mediaPager.loading && !mediaPager.items.length ? (
+            <SiteSpinner />
+          ) : null}
+          {mediaPager.error ? (
+            <p style={{ color: "var(--site-text-secondary)" }}>
+              {mediaPager.error}
+            </p>
+          ) : null}
+
           <ProgressMediaGrid
-            items={mediaTab === "photos" ? photoMedia : videoMedia}
+            items={mediaPager.items}
             allowDownload
             workspaceId={project.workspaceId}
             canDelete={canDeleteAllMedia}
             canManageVisibility={canManageMediaVisibility}
-            onChanged={() => void reload()}
-            size={mediaTab === "photos" ? photoSize : videoSize}
+            onChanged={onMediaMutated}
+            size={mediaTab === "videos" ? videoSize : photoSize}
+          />
+
+          <MediaPaginationBar
+            page={pageFromUrl}
+            totalPages={mediaPager.totalPages}
+            totalCount={mediaPager.totalCount}
+            busy={mediaPager.loading}
+            onPageChange={(next) =>
+              replaceProjectQuery({ page: next <= 1 ? null : next })
+            }
           />
         </div>
       ) : null}

@@ -355,3 +355,43 @@ export function groupMediaByDate(media: MediaItem[]) {
   });
   return map;
 }
+
+/**
+ * Build Journal/Journey day groups for one media page.
+ * Date order follows first appearance in pageMedia (createdAt order).
+ * A date that spans page boundaries continues on the next page.
+ */
+export function groupJournalMediaPage(
+  pageMedia: MediaItem[],
+  updates: DailyUpdate[],
+): {
+  groups: Array<{ date: string; items: DailyUpdate[] }>;
+  mediaByDate: Record<string, MediaItem[]>;
+} {
+  const updatesByDate = new Map<string, DailyUpdate[]>();
+  updates.forEach((u) => {
+    const list = updatesByDate.get(u.date) || [];
+    list.push(u);
+    updatesByDate.set(u.date, list);
+  });
+
+  const dateOrder: string[] = [];
+  const mediaByDate: Record<string, MediaItem[]> = {};
+  pageMedia.forEach((m) => {
+    const date = m.date || "";
+    if (!date) return;
+    if (!mediaByDate[date]) {
+      dateOrder.push(date);
+      mediaByDate[date] = [];
+    }
+    mediaByDate[date].push(m);
+  });
+
+  return {
+    groups: dateOrder.map((date) => ({
+      date,
+      items: updatesByDate.get(date) || [],
+    })),
+    mediaByDate,
+  };
+}

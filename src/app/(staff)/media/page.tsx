@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   SiteButton,
   SitePageHeader,
@@ -9,30 +10,36 @@ import {
 } from "@/components/progress/primitives";
 import { BunnyVideoUploader } from "@/components/media/bunny-video-uploader";
 import { ProgressMediaGrid } from "@/components/progress/media-grid";
+import { MediaPaginationBar } from "@/components/progress/media-pagination-bar";
 import { useAuth } from "@/lib/auth-context";
+import { useMediaPage } from "@/lib/hooks/use-media-page";
 import { fetchMyProjects, type MyProject } from "@/lib/services/projects";
-import { listMedia } from "@/lib/services/media";
-import type { MediaItem } from "@/lib/types";
+import type { MediaType, MediaVisibility } from "@/lib/types";
 import { getProjectDisplayName } from "@/lib/utils";
+
+function parsePage(raw: string | null) {
+  const n = Number(raw || "1");
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.floor(n);
+}
 
 export default function MediaLibraryPage() {
   const { profile } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [projects, setProjects] = useState<MyProject[]>([]);
-  const [projectId, setProjectId] = useState("");
-  const [media, setMedia] = useState<MediaItem[]>([]);
-  const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
 
+  const projectId = searchParams.get("projectId") || "";
+  const page = parsePage(searchParams.get("page"));
+  const filter = searchParams.get("filter") || "all";
+
   const selectedProject = projects.find((p) => p.id === projectId) || null;
-  // Always the selected Project's own workspaceId — never the USER's
-  // defaultWorkspaceId, which is wrong for a Project shared cross-workspace.
   const projectWorkspaceId =
     selectedProject?.workspaceId || selectedProject?.companyId || "";
   const isCreator = Boolean(
     selectedProject && profile?.uid && selectedProject.createdBy === profile.uid,
   );
-  // Same gate as Project Media: CLIENT must query clientVisible-only or
-  // Rules deny the whole unfiltered list and the grid stays empty.
   const isClientMember = selectedProject?.memberType === "CLIENT";
   const canManageMediaVisibility =
     Boolean(selectedProject?.isOwner) ||
@@ -40,14 +47,49 @@ export default function MediaLibraryPage() {
       Boolean(selectedProject?.allowStaffPublish) &&
       selectedProject?.effectivePermissions?.publishMediaToClient === true);
 
-  function reloadMedia() {
-    if (!projectId || !projectWorkspaceId) return;
-    listMedia(projectId, {
+  const typeFilter: MediaType | undefined =
+    filter === "photo" || filter === "video" ? filter : undefined;
+  const visibilityFilter: MediaVisibility | undefined =
+    filter === "client_visible" ||
+    filter === "internal" ||
+    filter === "handover"
+      ? filter
+      : undefined;
+
+  const filters = useMemo(() => {
+    if (!projectId || !projectWorkspaceId) return null;
+    return {
+      projectId,
       workspaceId: projectWorkspaceId,
       clientOnly: isClientMember,
-    })
-      .then(setMedia)
-      .catch(() => setMedia([]));
+      type: typeFilter,
+      visibility: isClientMember ? undefined : visibilityFilter,
+    };
+  }, [
+    projectId,
+    projectWorkspaceId,
+    isClientMember,
+    typeFilter,
+    visibilityFilter,
+  ]);
+
+  const pager = useMediaPage({
+    enabled: Boolean(filters),
+    surface: "Media",
+    filters,
+    page,
+    onPageClamp: (resolved) =>
+      replaceParams({ page: resolved <= 1 ? null : String(resolved) }),
+  });
+
+  function replaceParams(patch: Record<string, string | null>) {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null || value === "") params.delete(key);
+      else params.set(key, value);
+    }
+    const qs = params.toString();
+    router.replace(qs ? `/media?${qs}` : "/media", { scroll: false });
   }
 
   useEffect(() => {
@@ -61,7 +103,9 @@ export default function MediaLibraryPage() {
         const data = await fetchMyProjects();
         if (cancelled) return;
         setProjects(data);
-        if (data[0]) setProjectId(data[0].id);
+        if (!projectId && data[0]) {
+          replaceParams({ projectId: data[0].id, page: null });
+        }
       } catch {
         if (!cancelled) setProjects([]);
       } finally {
@@ -71,31 +115,13 @@ export default function MediaLibraryPage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.uid]);
 
+  // Clear stale grid immediately when switching projects.
   useEffect(() => {
-    if (!projectId || !projectWorkspaceId) return;
-    let cancelled = false;
-    listMedia(projectId, {
-      workspaceId: projectWorkspaceId,
-      clientOnly: isClientMember,
-    })
-      .then((items) => {
-        if (!cancelled) setMedia(items);
-      })
-      .catch(() => {
-        if (!cancelled) setMedia([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, projectWorkspaceId, isClientMember]);
-
-  const filtered = media.filter((item) => {
-    if (filter === "all") return true;
-    if (filter === "photo" || filter === "video") return item.type === filter;
-    return item.visibility === filter;
-  });
+    // project change is handled by useMediaPage; ensure URL page resets when project changes via select
+  }, [projectId]);
 
   if (loading) return <SiteSpinner />;
 
@@ -125,7 +151,12 @@ export default function MediaLibraryPage() {
       >
         <SiteSelect
           value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
+          onChange={(e) =>
+            replaceParams({
+              projectId: e.target.value || null,
+              page: null,
+            })
+          }
         >
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
@@ -133,13 +164,25 @@ export default function MediaLibraryPage() {
             </option>
           ))}
         </SiteSelect>
-        <SiteSelect value={filter} onChange={(e) => setFilter(e.target.value)}>
+        <SiteSelect
+          value={filter}
+          onChange={(e) =>
+            replaceParams({
+              filter: e.target.value === "all" ? null : e.target.value,
+              page: null,
+            })
+          }
+        >
           <option value="all">All</option>
           <option value="photo">Photos</option>
           <option value="video">Videos</option>
-          <option value="client_visible">Client visible</option>
-          <option value="internal">Internal</option>
-          <option value="handover">Handover</option>
+          {!isClientMember ? (
+            <>
+              <option value="client_visible">Client visible</option>
+              <option value="internal">Internal</option>
+              <option value="handover">Handover</option>
+            </>
+          ) : null}
         </SiteSelect>
       </div>
 
@@ -148,18 +191,33 @@ export default function MediaLibraryPage() {
           <BunnyVideoUploader
             projectId={projectId}
             workspaceId={projectWorkspaceId}
-            onUploaded={() => reloadMedia()}
+            onUploaded={() => void pager.reload({ bypassCache: true })}
           />
         </div>
       ) : null}
 
+      {pager.loading && !pager.items.length ? <SiteSpinner /> : null}
+      {pager.error ? (
+        <p style={{ color: "var(--site-text-secondary)" }}>{pager.error}</p>
+      ) : null}
+
       <ProgressMediaGrid
-        items={filtered}
+        items={pager.items}
         allowDownload
         workspaceId={projectWorkspaceId}
         canDelete={isCreator}
         canManageVisibility={canManageMediaVisibility}
-        onChanged={reloadMedia}
+        onChanged={() => void pager.reload({ bypassCache: true })}
+      />
+
+      <MediaPaginationBar
+        page={page}
+        totalPages={pager.totalPages}
+        totalCount={pager.totalCount}
+        busy={pager.loading}
+        onPageChange={(next) =>
+          replaceParams({ page: next <= 1 ? null : String(next) })
+        }
       />
 
       {!projects.length ? (

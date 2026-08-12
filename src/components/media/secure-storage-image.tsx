@@ -5,6 +5,34 @@ import { getBlob, ref } from "firebase/storage";
 import { getFirebaseStorage } from "@/lib/firebase";
 
 /**
+ * Session-scoped blob URLs for Storage paths. Survives SecureStorageImage
+ * unmount/remount so returning to a cached pagination page does not
+ * re-download thumbnails. Do not revoke while paths may still be shown.
+ */
+const blobUrlByPath = new Map<string, string>();
+const blobInflightByPath = new Map<string, Promise<string>>();
+
+function loadBlobUrl(path: string): Promise<string> {
+  const hit = blobUrlByPath.get(path);
+  if (hit) return Promise.resolve(hit);
+  const pending = blobInflightByPath.get(path);
+  if (pending) return pending;
+  const request = getBlob(ref(getFirebaseStorage(), path))
+    .then((blob) => {
+      const existing = blobUrlByPath.get(path);
+      if (existing) return existing;
+      const objectUrl = URL.createObjectURL(blob);
+      blobUrlByPath.set(path, objectUrl);
+      return objectUrl;
+    })
+    .finally(() => {
+      blobInflightByPath.delete(path);
+    });
+  blobInflightByPath.set(path, request);
+  return request;
+}
+
+/**
  * Loads a Storage object through the authenticated Firebase Web SDK getBlob().
  * variant="thumb" prefers thumbnailPath and falls back to storagePath for
  * historical records that have no thumbnail.
@@ -29,46 +57,49 @@ export function SecureStorageImage({
   alt?: string;
   className?: string;
 }) {
-  const [url, setUrl] = useState("");
+  const primary =
+    variant === "thumb"
+      ? thumbnailPath || storagePath || ""
+      : storagePath || "";
+  const secondary =
+    variant === "thumb" &&
+    thumbnailPath &&
+    storagePath &&
+    thumbnailPath !== storagePath
+      ? storagePath
+      : "";
+
+  const cachedPrimary = primary ? blobUrlByPath.get(primary) : undefined;
+  const [url, setUrl] = useState(cachedPrimary || "");
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    setFailed(false);
-    setUrl("");
-    const primary =
-      variant === "thumb"
-        ? thumbnailPath || storagePath || ""
-        : storagePath || "";
-    const secondary =
-      variant === "thumb" &&
-      thumbnailPath &&
-      storagePath &&
-      thumbnailPath !== storagePath
-        ? storagePath
-        : "";
+    let active = true;
 
     if (!primary && !fallbackUrl) {
       setFailed(true);
+      setUrl("");
       return;
     }
 
-    let active = true;
-    let objectUrl = "";
-
-    async function tryBlob(path: string) {
-      const blob = await getBlob(ref(getFirebaseStorage(), path));
-      return URL.createObjectURL(blob);
+    const immediate =
+      (primary && blobUrlByPath.get(primary)) ||
+      (secondary && blobUrlByPath.get(secondary)) ||
+      "";
+    if (immediate) {
+      setFailed(false);
+      setUrl(immediate);
+      return;
     }
+
+    setFailed(false);
+    setUrl("");
 
     void (async () => {
       if (primary) {
         try {
-          const next = await tryBlob(primary);
-          if (!active) {
-            URL.revokeObjectURL(next);
-            return;
-          }
-          objectUrl = next;
+          const next = await loadBlobUrl(primary);
+          if (!active) return;
           setUrl(next);
           return;
         } catch {
@@ -77,12 +108,8 @@ export function SecureStorageImage({
       }
       if (secondary) {
         try {
-          const next = await tryBlob(secondary);
-          if (!active) {
-            URL.revokeObjectURL(next);
-            return;
-          }
-          objectUrl = next;
+          const next = await loadBlobUrl(secondary);
+          if (!active) return;
           setUrl(next);
           return;
         } catch {
@@ -98,9 +125,9 @@ export function SecureStorageImage({
 
     return () => {
       active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      // Do not revoke — remounts / cached pages reuse blobUrlByPath.
     };
-  }, [variant, thumbnailPath, storagePath, fallbackUrl]);
+  }, [primary, secondary, fallbackUrl]);
 
   if (failed) return <span>Unavailable</span>;
   if (!url) return <span>Loading…</span>;
