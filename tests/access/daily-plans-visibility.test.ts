@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { eachDateKeyInclusive } from "@/lib/utils";
 
 vi.mock("@/lib/demo", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/demo")>();
@@ -16,6 +17,7 @@ const {
   listDailyPlans,
   listClientVisiblePlans,
   saveDailyPlan,
+  saveDailyPlansInRange,
 } = await import("@/lib/services/daily-plans");
 
 describe("dailyPlans clientVisible — Schedule-compatible defaults", () => {
@@ -82,5 +84,46 @@ describe("dailyPlans clientVisible — Schedule-compatible defaults", () => {
     // Mirrors month-calendar default clientVisible=true and !== false save.
     expect(isDailyPlanClientVisible({ clientVisible: true })).toBe(true);
     expect(isDailyPlanClientVisible({ clientVisible: false })).toBe(false);
+  });
+
+  it("eachDateKeyInclusive covers 14–18 Aug as five days", () => {
+    expect(eachDateKeyInclusive("2026-08-14", "2026-08-18")).toEqual([
+      "2026-08-14",
+      "2026-08-15",
+      "2026-08-16",
+      "2026-08-17",
+      "2026-08-18",
+    ]);
+  });
+
+  it("eachDateKeyInclusive with no end is a single day", () => {
+    expect(eachDateKeyInclusive("2026-08-14", "")).toEqual(["2026-08-14"]);
+    expect(eachDateKeyInclusive("2026-08-14", "2026-08-14")).toEqual([
+      "2026-08-14",
+    ]);
+  });
+
+  it("saveDailyPlansInRange writes the same plan across inclusive days", async () => {
+    const saved = await saveDailyPlansInRange({
+      projectId: "demo-berwick",
+      startDate: "2099-03-14",
+      endDate: "2099-03-18",
+      items: [{ workText: "Range tiling", color: "#111" }],
+      reminder: "Delivery",
+      note: "Range note",
+      workspaceId: "siteledger",
+    });
+    expect(saved).toHaveLength(5);
+    expect(saved.map((p) => p.date)).toEqual([
+      "2099-03-14",
+      "2099-03-15",
+      "2099-03-16",
+      "2099-03-17",
+      "2099-03-18",
+    ]);
+    expect(saved.every((p) => p.items[0]?.workText === "Range tiling")).toBe(
+      true,
+    );
+    expect(saved.every((p) => p.reminder === "Delivery")).toBe(true);
   });
 });

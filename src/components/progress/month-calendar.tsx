@@ -10,6 +10,7 @@ import {
   getDailyPlan,
   listDailyPlans,
   saveDailyPlan,
+  saveDailyPlansInRange,
 } from "@/lib/services/daily-plans";
 import type { DailyPlan, DailyPlanWorkItem, ScheduleItem } from "@/lib/types";
 import {
@@ -229,10 +230,14 @@ function DayPlanSheet({
   const [reminder, setReminder] = useState("");
   const [note, setNote] = useState("");
   const [clientVisible, setClientVisible] = useState(true);
+  const [startDate, setStartDate] = useState(date);
+  const [endDate, setEndDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    setStartDate(date);
+    setEndDate("");
     getDailyPlan(projectId, date, workspaceId).then((plan) => {
       const loaded = (plan?.items || [])
         .map((item) => ({
@@ -258,15 +263,30 @@ function DayPlanSheet({
     setBusy(true);
     setError("");
     try {
-      await saveDailyPlan({
-        projectId,
-        date,
-        items,
-        reminder,
-        note,
-        clientVisible,
-        workspaceId,
-      });
+      const start = startDate.trim() || date;
+      const end = endDate.trim();
+      if (end && end !== start) {
+        await saveDailyPlansInRange({
+          projectId,
+          startDate: start,
+          endDate: end,
+          items,
+          reminder,
+          note,
+          clientVisible,
+          workspaceId,
+        });
+      } else {
+        await saveDailyPlan({
+          projectId,
+          date: start,
+          items,
+          reminder,
+          note,
+          clientVisible,
+          workspaceId,
+        });
+      }
       await onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -320,6 +340,34 @@ function DayPlanSheet({
         </div>
 
         <form onSubmit={onSubmit} className="site-sheet-body">
+          {editable ? (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
+              <SiteField label="Start date">
+                <SiteInput
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  required
+                />
+              </SiteField>
+              <SiteField label="End date (optional)">
+                <SiteInput
+                  type="date"
+                  value={endDate}
+                  min={startDate || date}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  placeholder="Same day if empty"
+                />
+              </SiteField>
+            </div>
+          ) : null}
+
           {items.map((item, index) => (
             <div key={index} className="site-day-work-block">
               <div className="site-day-work-head">
@@ -411,7 +459,11 @@ function DayPlanSheet({
           ) : null}
           {editable ? (
             <SiteButton type="submit" variant="accent" disabled={busy}>
-              {busy ? "Saving…" : "Save day plan"}
+              {busy
+                ? "Saving…"
+                : endDate.trim() && endDate.trim() !== (startDate.trim() || date)
+                  ? "Save date range"
+                  : "Save day plan"}
             </SiteButton>
           ) : null}
         </form>

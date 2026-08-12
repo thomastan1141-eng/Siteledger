@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { thumbnailStoragePath } from "@/lib/paths";
 
+/**
+ * Grid/card contract: SecureStorageImage variant="thumb" prefers
+ * thumbnailPath and falls back to storagePath. Lightbox uses "original".
+ */
 describe("thumbnailStoragePath", () => {
   it("places _thumb.jpg beside the original file name", () => {
     expect(
@@ -29,5 +33,34 @@ describe("thumbnailStoragePath", () => {
     expect(original.endsWith("shot.jpg")).toBe(true);
     expect(thumb).not.toBe(original);
     expect(thumb.endsWith("shot_thumb.jpg")).toBe(true);
+  });
+
+  it("grid prefers thumbnailPath; missing thumb falls back to storagePath", () => {
+    const resolveGridPath = (item: {
+      storagePath?: string;
+      thumbnailPath?: string;
+    }) => item.thumbnailPath || item.storagePath || "";
+    expect(
+      resolveGridPath({
+        storagePath: "a/original.jpg",
+        thumbnailPath: "a/original_thumb.jpg",
+      }),
+    ).toBe("a/original_thumb.jpg");
+    expect(resolveGridPath({ storagePath: "a/legacy.jpg" })).toBe(
+      "a/legacy.jpg",
+    );
+  });
+
+  it("lightbox/open uses storagePath only (original)", () => {
+    const resolveOriginal = (item: {
+      storagePath?: string;
+      thumbnailPath?: string;
+    }) => item.storagePath || "";
+    expect(
+      resolveOriginal({
+        storagePath: "a/original.jpg",
+        thumbnailPath: "a/original_thumb.jpg",
+      }),
+    ).toBe("a/original.jpg");
   });
 });

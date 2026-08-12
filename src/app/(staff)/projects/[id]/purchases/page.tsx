@@ -62,6 +62,7 @@ export default function ProjectPurchasesPage() {
         project={project}
         activeTab="purchases"
         hiddenTabs={isClientMember ? ["settings"] : undefined}
+        tabLabels={isClientMember ? { journal: "Journey" } : undefined}
         actions={
           <ProjectChromeActions
             projectId={project.id}

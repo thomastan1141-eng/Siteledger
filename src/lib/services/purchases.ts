@@ -1066,11 +1066,13 @@ export async function uploadPurchasePhotos(
       );
     });
     let thumbnailPath: string | undefined;
+    let thumbnailUrl: string | undefined;
     try {
       const thumb = await createImageThumbnail(file);
       if (thumb) {
         const thumbPath = thumbnailStoragePath(path);
-        await uploadBytes(ref(getFirebaseStorage(), thumbPath), thumb, {
+        const thumbRef = ref(getFirebaseStorage(), thumbPath);
+        await uploadBytes(thumbRef, thumb, {
           contentType: "image/jpeg",
           customMetadata: {
             kind: "thumbnail",
@@ -1081,9 +1083,11 @@ export async function uploadPurchasePhotos(
           },
         });
         thumbnailPath = thumbPath;
+        thumbnailUrl = await getDownloadURL(thumbRef);
       }
     } catch {
       thumbnailPath = undefined;
+      thumbnailUrl = undefined;
     }
 
     uploaded.push({
@@ -1091,6 +1095,7 @@ export async function uploadPurchasePhotos(
       url: await getDownloadURL(storageRef),
       storagePath: path,
       ...(thumbnailPath ? { thumbnailPath } : {}),
+      ...(thumbnailUrl ? { thumbnailUrl } : {}),
       fileName: file.name,
       sizeBytes: file.size,
     });

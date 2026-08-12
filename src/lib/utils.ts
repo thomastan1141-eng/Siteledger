@@ -94,6 +94,28 @@ export function todayKey(date = new Date()) {
   return singaporeDateKey(date);
 }
 
+/**
+ * Inclusive calendar-day keys (yyyy-MM-dd). Swaps if end < start.
+ * Uses UTC date parts so Singapore calendar keys iterate without DST skew.
+ */
+export function eachDateKeyInclusive(startKey: string, endKey: string): string[] {
+  const start = (startKey || "").trim();
+  const end = (endKey || "").trim() || start;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return start ? [start] : [];
+  const from = start <= end ? start : end;
+  const to = start <= end ? end : start;
+  const [sy, sm, sd] = from.split("-").map(Number);
+  const [ey, em, ed] = to.split("-").map(Number);
+  const cur = new Date(Date.UTC(sy!, sm! - 1, sd!));
+  const last = new Date(Date.UTC(ey!, em! - 1, ed!));
+  const out: string[] = [];
+  while (cur.getTime() <= last.getTime()) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
 export function singaporeYearMonth(date = new Date()) {
   const key = singaporeDateKey(date);
   const [y, m] = key.split("-").map(Number);

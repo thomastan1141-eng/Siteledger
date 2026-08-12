@@ -44,7 +44,7 @@ import {
   updateProject,
 } from "@/lib/services/projects";
 import { listSchedule, summarizeSchedule } from "@/lib/services/schedule";
-import { groupUpdatesByDate, listUpdates } from "@/lib/services/updates";
+import { groupUpdatesByDate, groupClientJourneyByDate, groupMediaByDate, listUpdates } from "@/lib/services/updates";
 import { listMedia } from "@/lib/services/media";
 import type {
   ColleaguePermissions,
@@ -218,6 +218,7 @@ export default function ProjectDetailsPage() {
   }, [id]);
 
   const summary = useMemo(() => summarizeSchedule(schedule), [schedule]);
+  const isClientMember = access.memberType === "CLIENT";
   const mediaByUpdate = useMemo(() => {
     const map: Record<string, MediaItem[]> = {};
     media.forEach((item) => {
@@ -227,6 +228,17 @@ export default function ProjectDetailsPage() {
     });
     return map;
   }, [media]);
+  const journeyGroups = useMemo(
+    () =>
+      isClientMember
+        ? groupClientJourneyByDate(updates, media)
+        : groupUpdatesByDate(updates),
+    [updates, media, isClientMember],
+  );
+  const mediaByDate = useMemo(
+    () => (isClientMember ? groupMediaByDate(media) : undefined),
+    [media, isClientMember],
+  );
   const photoMedia = useMemo(
     () => media.filter((item) => item.type === "photo"),
     [media],
@@ -264,7 +276,6 @@ export default function ProjectDetailsPage() {
     }
   }
 
-  const isClientMember = access.memberType === "CLIENT";
   // Capability flags from resolved Project membership — never users.role.
   const canEditSchedule =
     access.isOwner || access.effectivePermissions?.updateSchedule === true;
@@ -304,6 +315,7 @@ export default function ProjectDetailsPage() {
         project={project}
         activeTab={tab}
         hiddenTabs={clientHiddenTabs.length ? clientHiddenTabs : undefined}
+        tabLabels={isClientMember ? { journal: "Journey" } : undefined}
         onTabChange={(next) => {
           if (next === "purchases") {
             router.push(`/projects/${project.id}/purchases`);
@@ -567,12 +579,20 @@ export default function ProjectDetailsPage() {
             />
           ) : null}
           <ProgressTimeline
-            groups={groupUpdatesByDate(updates)}
+            groups={journeyGroups}
             mediaByUpdate={mediaByUpdate}
+            mediaByDate={mediaByDate}
             allowDownload
             workspaceId={project.workspaceId}
+            canDelete={canDeleteAllMedia}
             canManageVisibility={canManageMediaVisibility}
             onMediaChanged={() => void reload()}
+            emptyTitle={isClientMember ? "Journey is empty" : "Journal is empty"}
+            emptyDescription={
+              isClientMember
+                ? "Client-visible photos and site updates will appear here by day."
+                : "Client-visible site updates will form the project story here."
+            }
           />
         </>
       ) : null}

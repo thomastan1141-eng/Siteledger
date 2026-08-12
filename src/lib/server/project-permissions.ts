@@ -249,7 +249,7 @@ export async function assertProjectPermission(input: {
       input.action === "UPLOAD_MEDIA"
         ? "You do not have permission to upload videos to this project."
         : input.action === "DELETE_MEDIA"
-          ? "You do not have permission to delete this video."
+          ? "You do not have permission to delete this media."
           : "You do not have access to this video.",
     ),
     { status: 403 },

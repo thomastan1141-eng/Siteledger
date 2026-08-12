@@ -25,6 +25,7 @@ import { dailyPlansPath, requireTenantId } from "../paths";
 import { sanitizeForFirestore } from "../sanitize";
 
 import type { DailyPlan, DailyPlanWorkItem } from "../types";
+import { eachDateKeyInclusive } from "../utils";
 
 
 
@@ -342,4 +343,34 @@ export async function listClientVisiblePlans(
 
 }
 
-
+export async function saveDailyPlansInRange(input: {
+  projectId: string;
+  startDate: string;
+  endDate?: string;
+  items: DailyPlanWorkItem[];
+  reminder?: string;
+  note?: string;
+  clientVisible?: boolean;
+  workspaceId?: string;
+}) {
+  const end = (input.endDate || "").trim();
+  const dates = eachDateKeyInclusive(
+    input.startDate,
+    end || input.startDate,
+  );
+  const saved: DailyPlan[] = [];
+  for (const date of dates) {
+    saved.push(
+      await saveDailyPlan({
+        projectId: input.projectId,
+        date,
+        items: input.items,
+        reminder: input.reminder,
+        note: input.note,
+        clientVisible: input.clientVisible,
+        workspaceId: input.workspaceId,
+      }),
+    );
+  }
+  return saved;
+}

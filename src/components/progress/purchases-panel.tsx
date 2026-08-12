@@ -156,7 +156,7 @@ function resolveCoverPhoto(item: PurchaseItem): PurchasePhoto | null {
   );
 }
 
-/** Table/card cover — thumbnail via getBlob, legacy URL fallback. */
+/** Table/card cover — thumbnail via getBlob, token-URL fallback for CLIENT. */
 function PurchaseCoverThumb({ item }: { item: PurchaseItem }) {
   const cover = resolveCoverPhoto(item);
   if (cover?.storagePath && cover.storagePath !== "demo") {
@@ -164,14 +164,15 @@ function PurchaseCoverThumb({ item }: { item: PurchaseItem }) {
       <SecureStorageImage
         storagePath={cover.storagePath}
         thumbnailPath={cover.thumbnailPath}
+        fallbackUrl={cover.thumbnailUrl || cover.url}
         variant="thumb"
         alt=""
       />
     );
   }
-  if (item.coverImageUrl) {
+  if (item.coverImageUrl || cover?.url) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={item.coverImageUrl} alt="" />;
+    return <img src={cover?.url || item.coverImageUrl} alt="" />;
   }
   return <span>No photo</span>;
 }
@@ -1602,7 +1603,7 @@ function PhotoField({
           {existing.map((photo, index) => (
             <PhotoThumb
               key={photo.id}
-              url={photo.url}
+              url={photo.thumbnailUrl || photo.url}
               storagePath={photo.storagePath}
               thumbnailPath={photo.thumbnailPath}
               isCover={coverImageUrl === photo.url}
@@ -1678,6 +1679,7 @@ function PhotoThumb({
         <SecureStorageImage
           storagePath={storagePath}
           thumbnailPath={thumbnailPath}
+          fallbackUrl={url}
           variant="thumb"
           alt=""
         />
@@ -2224,6 +2226,7 @@ function PurchaseGallery({
               photos[index].storagePath !== "demo" ? (
                 <SecureStorageImage
                   storagePath={photos[index].storagePath}
+                  fallbackUrl={photos[index].url}
                   variant="original"
                   alt=""
                   className="site-purchase-gallery-main"
@@ -2248,6 +2251,7 @@ function PurchaseGallery({
                       <SecureStorageImage
                         storagePath={p.storagePath}
                         thumbnailPath={p.thumbnailPath}
+                        fallbackUrl={p.thumbnailUrl || p.url}
                         variant="thumb"
                         alt=""
                       />

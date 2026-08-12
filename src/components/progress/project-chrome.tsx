@@ -45,6 +45,7 @@ export function ProjectChrome({
   onTabChange,
   actions,
   hiddenTabs,
+  tabLabels,
 }: {
   project: Project;
   activeTab: ProjectTabKey;
@@ -53,6 +54,8 @@ export function ProjectChrome({
   actions?: React.ReactNode;
   /** Tabs to omit entirely — e.g. "settings" for a Client-type member. */
   hiddenTabs?: ProjectTabKey[];
+  /** Optional label overrides (e.g. Journal → Journey for CLIENT). */
+  tabLabels?: Partial<Record<ProjectTabKey, string>>;
 }) {
   const visibleTabs = hiddenTabs?.length
     ? TABS.filter((t) => !hiddenTabs.includes(t.key))
@@ -81,6 +84,7 @@ export function ProjectChrome({
       <div className="site-filter-rail">
         {visibleTabs.map((tab) => {
           const active = activeTab === tab.key;
+          const label = tabLabels?.[tab.key] || tab.label;
           if (onTabChange && tab.key !== "purchases") {
             return (
               <button
@@ -90,7 +94,7 @@ export function ProjectChrome({
                 data-active={active}
                 onClick={() => onTabChange(tab.key)}
               >
-                {tab.label}
+                {label}
               </button>
             );
           }
@@ -101,7 +105,7 @@ export function ProjectChrome({
               className="site-chip"
               data-active={active}
             >
-              {tab.label}
+              {label}
             </Link>
           );
         })}

@@ -14,11 +14,11 @@ import {
 import { BunnyThumbnail } from "@/components/media/bunny-thumbnail";
 import { SecureBunnyPlayer } from "@/components/media/secure-bunny-player";
 import { SecureStorageImage } from "@/components/media/secure-storage-image";
+import { syncBunnyMedia } from "@/lib/bunny/client-upload";
 import {
-  deleteBunnyMedia,
-  syncBunnyMedia,
-} from "@/lib/bunny/client-upload";
-import { setMediaClientVisible } from "@/lib/services/media";
+  deleteProjectMedia,
+  setMediaClientVisible,
+} from "@/lib/services/media";
 import { getFirebaseStorage } from "@/lib/firebase";
 import type { MediaItem } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
@@ -251,29 +251,97 @@ export function ProgressMediaGrid({
     }
   }
 
-  async function removeVideo(item: MediaItem) {
+  async function removeMedia(item: MediaItem) {
     const ws = workspaceId || item.workspaceId || item.companyId;
     if (!ws) return;
-    if (!window.confirm("Delete this video from SiteLedger and Bunny Stream?")) {
+    const label = isBunnyVideo(item) ? "video" : "photo";
+    if (
+      !window.confirm(
+        `Delete this ${label} permanently? This cannot be undone.`,
+      )
+    ) {
       return;
     }
     setBusyId(item.id);
     try {
-      await deleteBunnyMedia({
+      await deleteProjectMedia({
         mediaId: item.id,
         projectId: item.projectId,
         workspaceId: ws,
       });
+      if (activeIndex !== null) setActiveIndex(null);
       onChanged?.();
     } catch (err) {
       window.alert(
         err instanceof Error
           ? err.message
-          : "The video could not be deleted. Please try again.",
+          : "The media could not be deleted. Please try again.",
       );
     } finally {
       setBusyId("");
     }
+  }
+
+  /** @deprecated Prefer removeMedia — kept for failed Bunny tile Remove button. */
+  async function removeVideo(item: MediaItem) {
+    await removeMedia(item);
+  }
+
+  async function applyBulkDelete() {
+    const targets = items.filter((item) => selectedIds.includes(item.id));
+    if (!targets.length) return;
+    if (
+      !window.confirm(
+        `Delete ${targets.length} selected item${targets.length === 1 ? "" : "s"} permanently? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBulkBusy(true);
+    const failures: Array<{ id: string; label: string; error: string }> = [];
+    for (const item of targets) {
+      const ws = workspaceId || item.workspaceId || item.companyId;
+      if (!ws) {
+        failures.push({
+          id: item.id,
+          label: mediaLabel(item),
+          error: "Missing workspace.",
+        });
+        continue;
+      }
+      try {
+        await deleteProjectMedia({
+          mediaId: item.id,
+          projectId: item.projectId,
+          workspaceId: ws,
+        });
+      } catch (err) {
+        failures.push({
+          id: item.id,
+          label: mediaLabel(item),
+          error:
+            err instanceof Error
+              ? err.message
+              : "The media could not be deleted.",
+        });
+      }
+    }
+    setBulkBusy(false);
+    onChanged?.();
+    if (failures.length) {
+      const detail = failures
+        .slice(0, 5)
+        .map((f) => `• ${f.label}: ${f.error}`)
+        .join("\n");
+      const more =
+        failures.length > 5 ? `\n…and ${failures.length - 5} more` : "";
+      window.alert(
+        `${failures.length} of ${targets.length} item(s) failed:\n${detail}${more}`,
+      );
+      setSelectedIds(failures.map((f) => f.id));
+      return;
+    }
+    exitSelectMode();
   }
 
   async function setItemVisibility(item: MediaItem, clientVisible: boolean) {
@@ -397,7 +465,7 @@ export function ProgressMediaGrid({
 
   return (
     <>
-      {canManageVisibility ? (
+      {canManageVisibility || canDelete ? (
         <div className="site-media-visibility-bar">
           {!selectMode ? (
             <SiteButton type="button" variant="soft" onClick={enterSelectMode}>
@@ -408,22 +476,36 @@ export function ProgressMediaGrid({
               <span className="site-media-visibility-count">
                 {selectedIds.length} selected
               </span>
-              <SiteButton
-                type="button"
-                variant="soft"
-                disabled={!selectedIds.length || bulkBusy}
-                onClick={() => void applyBulkVisibility(false)}
-              >
-                Make Internal
-              </SiteButton>
-              <SiteButton
-                type="button"
-                variant="soft"
-                disabled={!selectedIds.length || bulkBusy}
-                onClick={() => void applyBulkVisibility(true)}
-              >
-                Visible to Client
-              </SiteButton>
+              {canManageVisibility ? (
+                <>
+                  <SiteButton
+                    type="button"
+                    variant="soft"
+                    disabled={!selectedIds.length || bulkBusy}
+                    onClick={() => void applyBulkVisibility(false)}
+                  >
+                    Make Internal
+                  </SiteButton>
+                  <SiteButton
+                    type="button"
+                    variant="soft"
+                    disabled={!selectedIds.length || bulkBusy}
+                    onClick={() => void applyBulkVisibility(true)}
+                  >
+                    Visible to Client
+                  </SiteButton>
+                </>
+              ) : null}
+              {canDelete ? (
+                <SiteButton
+                  type="button"
+                  variant="ghost"
+                  disabled={!selectedIds.length || bulkBusy}
+                  onClick={() => void applyBulkDelete()}
+                >
+                  Delete selected
+                </SiteButton>
+              ) : null}
               <SiteButton
                 type="button"
                 variant="ghost"
@@ -685,14 +767,14 @@ export function ProgressMediaGrid({
                     </SiteButton>
                   )
                 ) : null}
-                {canDelete && isBunnyVideo(active) ? (
+                {canDelete ? (
                   <SiteButton
                     type="button"
                     variant="ghost"
                     disabled={busyId === active.id}
-                    onClick={() => void removeVideo(active)}
+                    onClick={() => void removeMedia(active)}
                   >
-                    Delete video
+                    {isBunnyVideo(active) ? "Delete video" : "Delete"}
                   </SiteButton>
                 ) : null}
               </div>

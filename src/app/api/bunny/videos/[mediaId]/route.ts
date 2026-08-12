@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebase-admin";
-import { softDeleteMedia, updateMediaAdmin } from "@/lib/bunny/media-store";
-import { deleteBunnyVideo } from "@/lib/bunny/server";
+import { updateMediaAdmin } from "@/lib/bunny/media-store";
 import { authErrorResponse, verifyAuthenticatedRequest } from "@/lib/server/auth";
 import { resolveProjectForUser } from "@/lib/server/project-directory";
 import {
@@ -113,54 +112,35 @@ export async function DELETE(
       return NextResponse.json({ error: "Media not found." }, { status: 404 });
     }
 
-    // Same ownership-before-permission ordering as PATCH above.
-    const resolved = await resolveProjectForUser(user.uid, projectId, body.workspaceId);
-    if (!resolved) {
-      return NextResponse.json({ error: "Project not found." }, { status: 404 });
-    }
-    const ref = getAdminDb().doc(
-      `companies/${resolved.workspaceId}/projects/${projectId}/media/${mediaId}`,
+    const { deleteProjectMediaItem } = await import(
+      "@/lib/server/delete-media"
     );
-    const snap = await ref.get();
-    if (!snap.exists || snap.data()?.provider !== "BUNNY_STREAM") {
-      return NextResponse.json({ error: "Media not found." }, { status: 404 });
-    }
-    const data = snap.data() || {};
-
-    const ctx = await assertProjectPermission({
+    await deleteProjectMediaItem({
       uid: user.uid,
       projectId,
-      workspaceId: resolved.workspaceId,
-      action: "DELETE_MEDIA",
-      uploadedBy: (data.uploadedBy as string | null) ?? null,
+      workspaceId: body.workspaceId,
+      mediaId,
     });
-    const previousStatus = data.status || "READY";
-    const bunnyVideoId = String(data.bunnyVideoId || "");
-    if (!bunnyVideoId) {
-      return NextResponse.json({ error: "Media not found." }, { status: 404 });
-    }
-
-    await updateMediaAdmin(ctx.workspaceId, projectId, mediaId, {
-      status: "DELETING",
-    });
-
-    const deleted = await deleteBunnyVideo(bunnyVideoId);
-    if (!deleted) {
-      await updateMediaAdmin(ctx.workspaceId, projectId, mediaId, {
-        status: previousStatus,
-      });
-      return NextResponse.json(
-        { error: "The video could not be deleted. Please try again." },
-        { status: 502 },
-      );
-    }
-
-    await softDeleteMedia(ctx.workspaceId, projectId, mediaId);
     return NextResponse.json({ ok: true });
   } catch (err) {
     const auth = authErrorResponse(err);
     if (auth.status === 401 || auth.status === 403) {
       return NextResponse.json({ error: auth.message }, { status: auth.status });
+    }
+    const status =
+      err && typeof err === "object" && "status" in err
+        ? Number((err as { status: number }).status)
+        : 500;
+    if (status === 404 || status === 502) {
+      return NextResponse.json(
+        {
+          error:
+            err instanceof Error
+              ? err.message
+              : "The video could not be deleted. Please try again.",
+        },
+        { status },
+      );
     }
     console.error("[bunny/delete]", err);
     return NextResponse.json(

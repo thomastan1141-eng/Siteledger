@@ -12,6 +12,7 @@
     "test:rules": "firebase emulators:exec --only firestore,storage \"vitest run tests/rules\"",
     "backfill:project-status": "tsx scripts/backfill-project-status.ts",
     "backfill:media-lifecycle": "tsx scripts/backfill-media-lifecycle.ts",
+    "backfill:thumbnails": "tsx scripts/backfill-thumbnails.ts",
     "report:access-migration": "tsx scripts/report-access-migration.ts"
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",
+    "sharp": "^0.35.3",
     "tailwind-merge": "^3.6.0",
     "tus-js-client": "^4.3.1",
     "zustand": "^5.0.14"
@@ -34,6 +36,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/sharp": "^0.31.1",
     "@types/tus-js-client": "^1.8.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",

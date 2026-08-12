@@ -356,6 +356,41 @@ export async function setMediaClientVisible(input: {
   return data as { clientVisible: boolean; visibility: MediaVisibility };
 }
 
+/**
+ * Delete one media item (photo or Bunny video). Media library and
+ * Journal/Journey both call this — server enforces DELETE_MEDIA.
+ */
+export async function deleteProjectMedia(input: {
+  mediaId: string;
+  projectId: string;
+  workspaceId?: string;
+}) {
+  const user = getFirebaseAuth().currentUser;
+  if (!user) throw new Error("Please sign in again.");
+  const token = await user.getIdToken();
+  const res = await fetch(
+    `/api/media/${encodeURIComponent(input.mediaId)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        projectId: input.projectId,
+        workspaceId: input.workspaceId,
+      }),
+    },
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      data.error || "The media could not be deleted. Please try again.",
+    );
+  }
+  return data as { ok: true; kind?: "photo" | "video" };
+}
+
 export function detectMediaKind(file: File): MediaType | null {
   if (isImageFile(file)) return "photo";
   if (isVideoFile(file)) return "video";

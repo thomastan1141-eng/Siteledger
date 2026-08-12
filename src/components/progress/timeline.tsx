@@ -23,17 +23,26 @@ function readStoredPhotoSize(): MediaGridSize {
 export function ProgressTimeline({
   groups,
   mediaByUpdate,
+  mediaByDate,
   allowDownload = false,
   workspaceId,
+  canDelete = false,
   canManageVisibility = false,
   onMediaChanged,
+  emptyTitle = "Journal is empty",
+  emptyDescription = "Client-visible site updates will form the project story here.",
 }: {
   groups: Array<{ date: string; items: DailyUpdate[] }>;
   mediaByUpdate: Record<string, MediaItem[]>;
+  /** When set (CLIENT Journey), attach media by capture date instead of updateId. */
+  mediaByDate?: Record<string, MediaItem[]>;
   allowDownload?: boolean;
   workspaceId?: string;
+  canDelete?: boolean;
   canManageVisibility?: boolean;
   onMediaChanged?: () => void;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }) {
   const [photoSize, setPhotoSize] = useState<MediaGridSize>(() =>
     readStoredPhotoSize(),
@@ -46,8 +55,8 @@ export function ProgressTimeline({
   if (!groups.length) {
     return (
       <SiteEmpty
-        title="Journal is empty"
-        description="Client-visible site updates will form the project story here."
+        title={emptyTitle}
+        description={emptyDescription}
       />
     );
   }
@@ -72,7 +81,9 @@ export function ProgressTimeline({
         const work = Array.from(
           new Set(items.flatMap((u) => [...u.workItems, ...u.customActivities])),
         );
-        const media = items.flatMap((u) => mediaByUpdate[u.id] || []);
+        const media = mediaByDate
+          ? mediaByDate[date] || []
+          : items.flatMap((u) => mediaByUpdate[u.id] || []);
         const photos = media.filter((m) => m.type === "photo").length;
         const videos = media.filter((m) => m.type === "video").length;
         const notes = items.map((u) => u.note).filter(Boolean);
@@ -120,6 +131,7 @@ export function ProgressTimeline({
                 items={media}
                 allowDownload={allowDownload}
                 workspaceId={workspaceId}
+                canDelete={canDelete}
                 canManageVisibility={canManageVisibility}
                 onChanged={onMediaChanged}
                 size={photoSize}

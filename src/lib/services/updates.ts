@@ -322,3 +322,36 @@ export function groupUpdatesByDate(updates: DailyUpdate[]) {
   });
   return Array.from(map.entries()).map(([date, items]) => ({ date, items }));
 }
+
+/**
+ * CLIENT Journey: one day block per date that has a client_visible update
+ * and/or clientVisible media. Does not invent a second media system — callers
+ * pass already-filtered updates (clientOnly) and media (clientOnly).
+ */
+export function groupClientJourneyByDate(
+  updates: DailyUpdate[],
+  media: MediaItem[],
+) {
+  const map = new Map<string, DailyUpdate[]>();
+  updates.forEach((u) => {
+    const list = map.get(u.date) || [];
+    list.push(u);
+    map.set(u.date, list);
+  });
+  media.forEach((m) => {
+    if (!map.has(m.date)) map.set(m.date, []);
+  });
+  return Array.from(map.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([date, items]) => ({ date, items }));
+}
+
+/** Group media by capture date for CLIENT Journey day cards. */
+export function groupMediaByDate(media: MediaItem[]) {
+  const map: Record<string, MediaItem[]> = {};
+  media.forEach((m) => {
+    map[m.date] = map[m.date] || [];
+    map[m.date].push(m);
+  });
+  return map;
+}

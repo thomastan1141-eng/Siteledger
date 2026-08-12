@@ -524,6 +524,8 @@ export interface PurchasePhoto {
   storagePath: string;
   /** Optional Firebase Storage path for a small grid JPEG. */
   thumbnailPath?: string;
+  /** Download-token URL for the thumbnail (grid); optional legacy rows omit it. */
+  thumbnailUrl?: string;
   fileName: string;
   sizeBytes: number;
 }

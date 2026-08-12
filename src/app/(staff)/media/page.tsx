@@ -31,12 +31,9 @@ export default function MediaLibraryPage() {
   const isCreator = Boolean(
     selectedProject && profile?.uid && selectedProject.createdBy === profile.uid,
   );
-  const isClientMember = Boolean(
-    selectedProject &&
-      profile?.uid &&
-      !isCreator &&
-      selectedProject.clientUserIds?.includes(profile.uid),
-  );
+  // Same gate as Project Media: CLIENT must query clientVisible-only or
+  // Rules deny the whole unfiltered list and the grid stays empty.
+  const isClientMember = selectedProject?.memberType === "CLIENT";
   const canManageMediaVisibility =
     Boolean(selectedProject?.isOwner) ||
     (!isClientMember &&
@@ -45,7 +42,12 @@ export default function MediaLibraryPage() {
 
   function reloadMedia() {
     if (!projectId || !projectWorkspaceId) return;
-    listMedia(projectId, { workspaceId: projectWorkspaceId }).then(setMedia);
+    listMedia(projectId, {
+      workspaceId: projectWorkspaceId,
+      clientOnly: isClientMember,
+    })
+      .then(setMedia)
+      .catch(() => setMedia([]));
   }
 
   useEffect(() => {
@@ -73,8 +75,21 @@ export default function MediaLibraryPage() {
 
   useEffect(() => {
     if (!projectId || !projectWorkspaceId) return;
-    listMedia(projectId, { workspaceId: projectWorkspaceId }).then(setMedia);
-  }, [projectId, projectWorkspaceId]);
+    let cancelled = false;
+    listMedia(projectId, {
+      workspaceId: projectWorkspaceId,
+      clientOnly: isClientMember,
+    })
+      .then((items) => {
+        if (!cancelled) setMedia(items);
+      })
+      .catch(() => {
+        if (!cancelled) setMedia([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, projectWorkspaceId, isClientMember]);
 
   const filtered = media.filter((item) => {
     if (filter === "all") return true;
